@@ -47,6 +47,8 @@ export interface ExtensionApi {
   /** Test seam: create a thread the way the UI's "+" does (not yet known to Overleaf). */
   newThread(uri: vscode.Uri, range: vscode.Range): vscode.CommentThread;
   thread(i: number): vscode.CommentThread;
+  /** Test seam: simulate a click (collapsed cursor or whole-line selection) and report whether a thread opened. */
+  click(uri: vscode.Uri, sel: vscode.Selection): Promise<boolean>;
   /** Test seam: what the sidebar tree shows (file -> thread titles). */
   tree(): { file: string; threads: string[] }[];
   status(): string;
@@ -317,6 +319,18 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     if (text) await replyOrCreate({ thread: e.thread, text } as vscode.CommentReply);
   }
 
+  /** Clicking a commented line's gutter or text opens its thread (the widget itself appears below the range's last line). */
+  function openForClick(uri: vscode.Uri, doc: vscode.TextDocument, sel: vscode.Selection): boolean {
+    const wholeLines = !sel.isEmpty && sel.start.character === 0 && (sel.end.character === 0 || sel.end.character === doc.lineAt(sel.end.line).range.end.character);
+    if (!sel.isEmpty && !wholeLines) return false; // a dragged text selection is for editing / new comments
+    const hit = threads.find(t => t.thread.uri.toString() === uri.toString() && (sel.isEmpty
+      ? t.thread.range.contains(sel.start)
+      : t.thread.range.start.line <= sel.end.line - (sel.end.character === 0 ? 1 : 0) && t.thread.range.end.line >= sel.start.line));
+    if (!hit || hit.thread.collapsibleState === vscode.CommentThreadCollapsibleState.Expanded) return false;
+    hit.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    return true;
+  }
+
   async function setResolved(thread: vscode.CommentThread, resolved: boolean) {
     const known = threads.find(t => t.thread === thread);
     if (!known) return;
@@ -329,6 +343,9 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     treeChanged,
     output,
     statusItem,
+    vscode.window.onDidChangeTextEditorSelection(e => {
+      if (e.kind === vscode.TextEditorSelectionChangeKind.Mouse && cfg().get<boolean>('openOnClick') !== false) openForClick(e.textEditor.document.uri, e.textEditor.document, e.selections[0]);
+    }),
     vscode.window.onDidChangeActiveTextEditor(e => e && poke(e.document.uri)),
     vscode.window.onDidChangeVisibleTextEditors(es => { es.forEach(e => poke(e.document.uri)); markers.apply(); }),
     vscode.window.onDidChangeWindowState(w => {
@@ -391,6 +408,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   void refresh(false).then(() => refresh());
   return {
     render,
+    click: async (uri, sel) => openForClick(uri, await vscode.workspace.openTextDocument(uri), sel),
     setPrompts: p => { prompts = p; },
     useClient: c => { injected = c; },
     newThread: (uri, range) => controller.createCommentThread(uri, range, []),

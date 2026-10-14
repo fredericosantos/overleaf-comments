@@ -133,6 +133,11 @@
             "highlight"
           ],
           "description": "Extra markers drawn for each Overleaf thread, on top of VS Code's native comment icon. Default: the standard icon left of the line numbers and a faint highlight of the commented text. 'Overleaf Comments: Choose Markers' toggles them."
+        },
+        "overleafComments.openOnClick": {
+          "type": "boolean",
+          "default": true,
+          "description": "Clicking a commented line's gutter or text opens its thread (a dragged text selection does not)."
         }
       }
     },
