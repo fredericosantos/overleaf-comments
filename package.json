@@ -63,14 +63,6 @@
         "icon": "$(close)"
       },
       {
-        "command": "overleafComments.hoverReply",
-        "title": "Overleaf Comments: hoverReply"
-      },
-      {
-        "command": "overleafComments.hoverResolve",
-        "title": "Overleaf Comments: hoverResolve"
-      },
-      {
         "command": "overleafComments.toggleMessage",
         "title": "Overleaf Comments: toggleMessage"
       },
@@ -138,14 +130,6 @@
         },
         {
           "command": "overleafComments.close",
-          "when": "false"
-        },
-        {
-          "command": "overleafComments.hoverReply",
-          "when": "false"
-        },
-        {
-          "command": "overleafComments.hoverResolve",
           "when": "false"
         },
         {

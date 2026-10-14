@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { locate, occurrenceAt, highlightShape, lfView, shiftAnchor, anchorAt } from '../src/anchor.ts';
 import { projectIdFromRemote } from '../src/project.ts';
-import { hoverContent, colorOf, actionLinks, htmlSafe, authorOf, clipForThread, visibleIndices, messageHeight, THREAD_MAX_LINES, COLLAPSE_LINES, COLLAPSE_CHARS, MAX_CHARS, MAX_SHOWN } from '../src/hover.ts';
+import { authorOf, clipForThread, visibleIndices, messageHeight, THREAD_MAX_LINES, COLLAPSE_LINES, COLLAPSE_CHARS } from '../src/text.ts';
 
 const id = '6acf64d6fe2f2fd26f343c60';
 
@@ -31,31 +31,6 @@ test('occurrenceAt matches olcli scan order', () => {
   assert.equal(occurrenceAt(t, 1, 'ab'), undefined); // not a match start
   assert.equal(occurrenceAt('aaa', 1, 'aa'), undefined); // overlapping: olcli would pick offset 0 or none
   assert.equal(occurrenceAt(t, 0, ''), undefined);
-});
-
-test('hover: a wall of huge comments stays bounded; users keep their own color', () => {
-  const wall = 'Lorem ipsum dolor sit amet. '.repeat(400); // ~11 000 chars per message
-  const users = [{ id: 'u1', name: 'Ada' }, { id: 'u2', name: 'Grace' }];
-  const messages = Array.from({ length: 10 }, (_, i) => ({ id: `m${i}`, content: `${i}: ${wall}`, user_id: users[i % 2].id, user: users[i % 2] }));
-  const h = hoverContent({ threadId: 't', docId: 'd', path: 'a.tex', position: 0, line: 1, column: 1, selectedText: 'x', resolved: false, messages });
-  assert.equal(h.lines.length, MAX_SHOWN);
-  assert.equal(h.hidden, 10 - MAX_SHOWN);
-  assert.deepEqual(h.lines.map(l => l.text.slice(0, 1)), ['0', '1', '7', '8', '9']); // first 2 + latest 3
-  assert.ok(h.lines.every(l => l.text.length < MAX_CHARS + 60 && l.text.includes('more characters')));
-  const total = h.lines.reduce((n, l) => n + l.text.length + l.author.length, 0);
-  assert.ok(total < MAX_SHOWN * (MAX_CHARS + 80), `hover text bounded (${total})`);
-  assert.equal(colorOf(messages[0]), colorOf(messages[2])); // same user, same color
-  assert.notEqual(colorOf(messages[0]), colorOf(messages[1])); // different users differ (palette has no collision for u1/u2)
-  // short threads are untouched
-  const few = hoverContent({ threadId: 't', docId: 'd', path: 'a.tex', position: 0, line: 1, column: 1, selectedText: 'x', resolved: false, messages: messages.slice(0, 3).map(m => ({ ...m, content: 'short' })) });
-  assert.deepEqual([few.lines.length, few.hidden, few.lines[0].text], [3, 0, 'short']);
-});
-
-test('hover action links carry the thread id', () => {
-  const base = { threadId: 'T 1&2', docId: 'd', path: 'a.tex', position: 0, line: 1, column: 1, selectedText: 'x', messages: [], resolved: false };
-  const links = actionLinks(base);
-  assert.match(links, /\[Reply\]\(command:overleafComments\.hoverReply\?%5B%22T%201%262%22%5D\)/);
-  assert.match(links, /\[Resolve\]\(command:overleafComments\.hoverResolve\?%5B%22T%201%262%22%5D\)/);
 });
 
 test('highlightShape: text within a line, whole lines across lines or on a blank line', () => {
@@ -153,12 +128,6 @@ test('cache: only a well-formed cache for the same project is accepted', () => {
   assert.equal(parseCache(null, 'P1'), undefined);
 });
 
-test('htmlSafe neutralises tags and entities; authorOf tolerates a missing message', () => {
-  assert.equal(htmlSafe('<img src="x"> a&b'), '&lt;img src="x"&gt; a&amp;b');
-  assert.equal(authorOf(undefined), 'unknown');
-  assert.equal(authorOf({ id: '1', content: '', user: { first_name: 'Ada', last_name: 'L' } }), 'Ada L');
-});
-
 test('Model.seed shows cached data without beating a real fetch', () => {
   const m = new Model();
   const fetchTicket = m.nextTicket();
@@ -197,4 +166,11 @@ test('visibleIndices: short threads whole; tall ones keep the first and the late
   assert.deepEqual(visibleIndices([3, 3, 40], 10), [0, 2]); // the latest stays even if it alone busts the budget
   assert.equal(messageHeight('one line'), 3);
   assert.equal(messageHeight('x\n'.repeat(30)), COLLAPSE_LINES + 2);
+});
+
+test('authorOf: name, else first+last, else email, else unknown; tolerates a missing message', () => {
+  assert.equal(authorOf(undefined), 'unknown');
+  assert.equal(authorOf({ id: '1', content: '', user: { name: 'Ada' } }), 'Ada');
+  assert.equal(authorOf({ id: '1', content: '', user: { first_name: 'Ada', last_name: 'L' } }), 'Ada L');
+  assert.equal(authorOf({ id: '1', content: '', user: { email: 'a@b.c' } }), 'a@b.c');
 });

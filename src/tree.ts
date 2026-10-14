@@ -1,7 +1,7 @@
 // The sidebar tree: files -> threads (open and resolved) -> messages.
 import * as vscode from 'vscode';
 import type { ProjectComment, CommentMessage } from '@aloth/olcli';
-import { authorOf } from './hover.ts';
+import { authorOf } from './text.ts';
 
 export type Node = { kind: 'file'; path: string; comments: ProjectComment[] } | { kind: 'thread'; c: ProjectComment } | { kind: 'msg'; m: CommentMessage };
 

@@ -137,16 +137,7 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('overleafComments.resolve', api.thread(0));
   assert.deepEqual(calls.pop(), ['resolve', '0123456789abcdef01234567', 'T1']);
 
-  // hover links run the same actions by thread id
   api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d });
-  await seed();
-  await vscode.commands.executeCommand('overleafComments.hoverReply', 'T1');
-  // Reply from the hover = open the thread (its reply box cannot be inspected headlessly; checked by hand)
-  assert.equal(api.thread(0).collapsibleState, vscode.CommentThreadCollapsibleState.Expanded);
-  assert.equal(calls.length, 0, 'focusing the reply box must not send anything');
-  await seed();
-  await vscode.commands.executeCommand('overleafComments.hoverResolve', 'T1');
-  assert.deepEqual(calls.pop(), ['resolve', '0123456789abcdef01234567', 'T1']);
 
   const g = doc.getText().indexOf('gamma delta');
   const fresh = api.newThread(uri, new vscode.Range(doc.positionAt(g), doc.positionAt(g + 'gamma delta'.length)));

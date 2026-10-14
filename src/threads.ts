@@ -1,9 +1,9 @@
 // The editor side: one comment thread per OPEN comment (resolved ones live only in the sidebar), kept in place across
-// refreshes, re-anchored as the file is edited, with the highlight/hover markers on top.
+// refreshes, re-anchored as the file is edited, with the highlight on top.
 import * as vscode from 'vscode';
 import type { ProjectComment, CommentMessage } from '@aloth/olcli';
 import { locate, lfView, shiftAnchor } from './anchor.ts';
-import { authorOf, clipForThread, messageHeight, visibleIndices } from './hover.ts';
+import { authorOf, clipForThread, messageHeight, visibleIndices } from './text.ts';
 import { Highlights } from './markers.ts';
 import type { Model } from './model.ts';
 import type { Session } from './session.ts';

@@ -8,7 +8,7 @@ import { Sync } from './sync.ts';
 import { Writes } from './writes.ts';
 import { CommentsTree, commentOf, firstText, type Node } from './tree.ts';
 import { focusReply, reveal } from './navigate.ts';
-import { CACHE_KEY, COOKIE_KEY, cfg, setContext, type Client, type Entry, type Prompts, type Reply } from './common.ts';
+import { CACHE_KEY, COOKIE_KEY, cfg, setContext, type Client, type Prompts, type Reply } from './common.ts';
 
 export type { Prompts };
 
@@ -50,7 +50,6 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
   drain = writes.drain;
 
   const command = (id: string, fn: (...args: never[]) => unknown) => vscode.commands.registerCommand(`overleafComments.${id}`, fn);
-  const onThread = (fn: (e: Entry) => unknown) => (id: string) => { const e = threads.byId(id); return e && fn(e); };
 
   ctx.subscriptions.push(
     output, threads, tree, treeView, sync, writes,
@@ -80,8 +79,6 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     command('treeReply', (n: Node) => { const c = commentOf(n); const e = c && threads.byId(c.threadId); return e && focusReply(e); }),
     command('treeResolve', (n: Node) => { const c = commentOf(n); return c && writes.track(writes.setResolved(c.threadId, true)); }),
     command('treeReopen', (n: Node) => { const c = commentOf(n); return c && writes.track(writes.setResolved(c.threadId, false)); }),
-    command('hoverReply', onThread(focusReply)),
-    command('hoverResolve', (id: string) => writes.track(writes.setResolved(id, true))),
     command('refresh', () => vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Overleaf comments' }, () => sync.refresh())),
     command('clearCookie', async () => {
       await ctx.secrets.delete(COOKIE_KEY);

@@ -8,16 +8,16 @@ Comments are cached in VS Code workspace storage (outside the repo), never commi
 
 ## What you can do
 
-- **Read:** open comments are drawn in the text as a faint highlight (exactly the commented text, or whole lines when the comment spans several lines) with VS Code's native comment icon, which sits on the last line of a multi-line comment, where the thread opens. Hovering the highlight shows the thread: authors in their own colors, long threads clipped (first 2 and latest 3 messages, 400 characters each), with **Reply** and **Resolve** links.
+- **Read:** open comments are drawn in the text as a faint highlight (exactly the commented text, or whole lines when the comment spans several lines) with VS Code's native comment icon, which sits on the last line of a multi-line comment, where the thread opens.
 - **Sidebar:** the **Overleaf Comments** view in the activity bar lists every comment, open and resolved, by file (drag the view to the secondary side bar to keep it on the right). Click one to jump to it; open ones have Reply and Resolve buttons, resolved ones a Reopen button. Resolved comments are shown only here, never in the text. The extension sets `comments.openView` to `never` so VS Code's own bottom Comments panel does not also open by itself (you can still open or hide it by hand).
 - **Reply:** type in a thread's reply box. The box clears at once and your text shows as "Syncing…" until Overleaf has it; if the send fails the text is removed again and you get **Retry** and **Copy text**.
-- **Resolve / reopen:** the check button on a thread, **Resolve** in the hover, or the sidebar. The comment moves between the text and the sidebar's resolved list immediately, and stays there even if Overleaf is slow to report it; if Overleaf refuses it moves back and the error is shown.
+- **Resolve / reopen:** the check button on a thread, or the sidebar. The comment moves between the text and the sidebar's resolved list immediately, and stays there even if Overleaf is slow to report it; if Overleaf refuses it moves back and the error is shown.
 - **New comment:** select text, click the `+` in the gutter, type. With nothing selected it anchors to the clicked line's text; a blank line is anchored to its line break. The extension asks Overleaf to anchor to that exact occurrence (also on CRLF files) and warns if Overleaf attached it to different text. If the text is not in Overleaf's copy yet, it offers to commit that one file and push the current branch, then adds the comment (it refuses a detached HEAD or a branch without an upstream).
 - **Tall threads:** a thread taller than about 24 lines shows its first comment and the latest ones that fit, with "N more comments hidden. Show entire thread" in between; the header's **Show entire comments** button lifts the cut. The extension also turns VS Code's `comments.maxHeight` off, so a comment is never given its own scrollbar: what you expand is shown in full.
 - **Long comments:** a comment longer than 5 lines (or 400 characters) is collapsed in the thread with a **Show more…** link (then **Show less**), like Overleaf, so the thread itself is what scrolls, not each comment. A thread that has a long comment also gets a **Show entire comments** button next to Resolve (then **Collapse comments**).
 - **Close:** each open thread's header has a Close button (collapse), and clicking anywhere else in the text closes open comments (clicking inside a comment's own text leaves it open). Threads open only from the comment icon or the sidebar, never by clicking the text.
 
-Comment widgets always open below their line; VS Code has no setting for placing them above, and no extension API to focus a thread's reply box (the hover's Reply is best effort).
+Comment widgets always open below their line; VS Code has no setting for placing them above, and no extension API to focus a thread's reply box (the sidebar's Reply is best effort).
 
 ## Use
 

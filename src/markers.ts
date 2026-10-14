@@ -1,17 +1,14 @@
 // What we draw on top of VS Code's native comment icon: a faint background on exactly the commented text
-// (open comments only: resolved ones are shown in the sidebar) and a hover with the thread's text.
+// (whole lines when the comment spans several). Open comments only: resolved ones are shown in the sidebar.
 import * as vscode from 'vscode';
 import type { ProjectComment } from '@aloth/olcli';
-import { hoverContent, actionLinks, htmlSafe, HOVER_COMMANDS } from './hover.ts';
 import { highlightShape } from './anchor.ts';
 
 export interface MarkerEntry { thread: vscode.CommentThread; comment: ProjectComment }
 
 export class Highlights implements vscode.Disposable {
   private readonly open = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(245,166,35,0.16)', borderRadius: '2px' });
-
   private readonly openLines = vscode.window.createTextEditorDecorationType({ isWholeLine: true, backgroundColor: 'rgba(245,166,35,0.16)' });
-  private readonly hover = vscode.window.createTextEditorDecorationType({});
 
   constructor(private readonly entries: () => MarkerEntry[]) {}
 
@@ -30,23 +27,8 @@ export class Highlights implements vscode.Disposable {
       }
       editor.setDecorations(this.open, text);
       editor.setDecorations(this.openLines, lines);
-      editor.setDecorations(this.hover, mine.map(e => ({ range: e.thread.range, hoverMessage: this.hoverText(e) })));
     }
   }
 
-  private hoverText(e: MarkerEntry): vscode.MarkdownString {
-    const md = new vscode.MarkdownString();
-    md.isTrusted = { enabledCommands: HOVER_COMMANDS }; // lets the Reply/Resolve links run our commands only
-    md.supportHtml = true; // for the colored <span> around each author; every piece of user text goes through htmlSafe first
-    md.appendMarkdown(`**Overleaf thread** · ${actionLinks(e.comment)}\n\n`);
-    const { lines, hidden, hiddenAt } = hoverContent(e.comment);
-    lines.forEach((l, i) => {
-      if (hidden && i === hiddenAt) md.appendMarkdown(`*… ${hidden} more message${hidden === 1 ? '' : 's'} hidden — open the thread from the comment icon or the side panel …*\n\n`);
-      md.appendMarkdown(`<span style="color:${l.color};">**`).appendText(htmlSafe(l.author)).appendMarkdown('**</span>\n\n');
-      md.appendText(htmlSafe(l.text)).appendMarkdown('\n\n');
-    });
-    return md;
-  }
-
-  dispose(): void { [this.open, this.openLines, this.hover].forEach(d => d.dispose()); }
+  dispose(): void { [this.open, this.openLines].forEach(d => d.dispose()); }
 }
