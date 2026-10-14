@@ -13,6 +13,7 @@ export async function run(): Promise<void> {
   const ext = vscode.extensions.getExtension<ExtensionApi>('fredericosantos.overleaf-comments')!;
   const api = await ext.activate();
   await vscode.workspace.getConfiguration('overleafComments').update('projectId', id, vscode.ConfigurationTarget.Global);
+  await new Promise(r => setTimeout(r, 500)); // the extension reloads when this setting changes; let that finish
   api.useClient(real);
   const uri = vscode.Uri.joinPath(root, 'chap/f1.tex');
   const doc = await vscode.workspace.openTextDocument(uri);
@@ -25,6 +26,7 @@ export async function run(): Promise<void> {
     // 1. add a comment on a selection -> server round trip -> thread rendered on the same text
     const t = api.newThread(uri, new vscode.Range(doc.positionAt(at), doc.positionAt(at + sel.length)));
     await vscode.commands.executeCommand('overleafComments.reply', { thread: t, text: marker });
+    await api.idle(); // the reply command returns at once; the send runs in the background
     const added = (await real.listComments(id, { status: 'all' })).find(c => c.messages.some(m => m.content === marker));
     assert.ok(added, 'new comment not found on Overleaf');
     threadId = added.threadId;
@@ -35,6 +37,7 @@ export async function run(): Promise<void> {
     // 2. reply to it
     const idx = api.threads().findIndex(x => x.threadId === threadId);
     await vscode.commands.executeCommand('overleafComments.reply', { thread: api.thread(idx), text: `${marker} reply` });
+    await api.idle();
     const replied = (await real.listComments(id, { status: 'all' })).find(c => c.threadId === threadId)!;
     assert.deepEqual(replied.messages.map(m => m.content), [marker, `${marker} reply`]);
 

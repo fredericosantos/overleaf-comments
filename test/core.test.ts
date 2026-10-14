@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { locate, occurrenceAt, highlightShape } from '../src/anchor.ts';
+import { locate, occurrenceAt, highlightShape, lfView, shiftAnchor, anchorAt } from '../src/anchor.ts';
 import { projectIdFromRemote } from '../src/project.ts';
-import { hoverContent, colorOf, actionLinks, MAX_CHARS, MAX_SHOWN } from '../src/hover.ts';
+import { hoverContent, colorOf, actionLinks, htmlSafe, authorOf, MAX_CHARS, MAX_SHOWN } from '../src/hover.ts';
 
 const id = '6acf64d6fe2f2fd26f343c60';
 
@@ -65,4 +65,105 @@ test('highlightShape: text within a line, whole lines across lines or on a blank
   assert.deepEqual(highlightShape(p(7, 3), p(8, 5)), { kind: 'lines', lastLine: 8 }); // two lines, partial first/last
   assert.deepEqual(highlightShape(p(2, 0), p(4, 0)), { kind: 'lines', lastLine: 3 }); // ends at col 0 of next line = trailing newline
   assert.deepEqual(highlightShape(p(5, 0), p(6, 0)), { kind: 'lines', lastLine: 5 }); // blank line comment (its line break)
+});
+
+test('lfView maps offsets both ways on CRLF text and is free on LF text', () => {
+  const plain = lfView('a\nb');
+  assert.deepEqual([plain.lf, plain.fromDoc(2), plain.toDoc(2)], ['a\nb', 2, 2]);
+  const v = lfView('a\r\nb\r\nc'); // doc: a0 \r1 \n2 b3 \r4 \n5 c6
+  assert.equal(v.lf, 'a\nb\nc');
+  assert.deepEqual([v.fromDoc(3), v.fromDoc(6)], [2, 4]);
+  assert.deepEqual([v.toDoc(2), v.toDoc(4)], [3, 6]); // 'b' and 'c'
+  assert.equal(v.lf[v.fromDoc(6)], 'c');
+});
+
+test('shiftAnchor: before moves it, after leaves it, boundaries stay outside, inside marks touched', () => {
+  assert.deepEqual(shiftAnchor(10, 15, [{ offset: 0, length: 0, text: 'xx' }]), { start: 12, end: 17, touched: false });
+  assert.deepEqual(shiftAnchor(10, 15, [{ offset: 20, length: 0, text: 'xx' }]), { start: 10, end: 15, touched: false });
+  assert.deepEqual(shiftAnchor(10, 15, [{ offset: 10, length: 0, text: 'xx' }]), { start: 12, end: 17, touched: false }); // typed at the start
+  assert.deepEqual(shiftAnchor(10, 15, [{ offset: 15, length: 0, text: 'xx' }]), { start: 10, end: 15, touched: false }); // typed at the end
+  assert.deepEqual(shiftAnchor(10, 15, [{ offset: 11, length: 2, text: '' }]), { start: 10, end: 13, touched: true }); // deleted inside
+  assert.equal(shiftAnchor(10, 15, [{ offset: 8, length: 4, text: 'z' }]).touched, true); // overlaps the start
+  // two changes in one event (multi-cursor), both in pre-change coordinates
+  assert.deepEqual(shiftAnchor(10, 15, [{ offset: 0, length: 0, text: 'a' }, { offset: 30, length: 0, text: 'b' }]), { start: 11, end: 16, touched: false });
+});
+
+test('anchorAt: selection, line fallback, blank line, CRLF, repeated text', () => {
+  const t = 'one two\n\nthree two\n';
+  assert.deepEqual(anchorAt(t, 4, 7), { selectedText: 'two', occurrence: 1 });
+  assert.deepEqual(anchorAt(t, 15, 18), { selectedText: 'two', occurrence: 2 }); // the second "two"
+  assert.deepEqual(anchorAt(t, 11, 11), { selectedText: 'three two', occurrence: 1 }); // nothing selected: the line
+  assert.deepEqual(anchorAt(t, 8, 8), { selectedText: '\n', occurrence: 2 }); // blank line = its break (2nd "\n")
+  assert.deepEqual(anchorAt('abc', 3, 3), { selectedText: 'abc', occurrence: 1 }); // end of a non-blank line: that line
+  assert.equal(anchorAt('abc\n', 4, 4), undefined); // the empty last line has no break to anchor to
+  const crlf = 'one two\r\n\r\nthree two\r\n';
+  assert.deepEqual(anchorAt(crlf, 4, 7), { selectedText: 'two', occurrence: 1 });
+  assert.deepEqual(anchorAt('x\r\ny\r\nz', 0, 4), { selectedText: 'x\ny', occurrence: 1 }); // multi-line selection sent with "\n"
+});
+
+import { Model, parseCache, serializeCache, INTENT_TTL_MS } from '../src/model.ts';
+const cm = (id: string, resolved = false) => ({ threadId: id, docId: 'd', path: 'a.tex', position: 0, line: 1, column: 1, selectedText: 'x', resolved, messages: [] });
+
+test('Model: a slow older fetch cannot overwrite a newer one', () => {
+  const m = new Model();
+  const slow = m.nextTicket();
+  const fast = m.nextTicket();
+  assert.equal(m.applyFetch(fast, [cm('a', true)]), true);
+  assert.equal(m.applyFetch(slow, [cm('a', false)]), false); // stale: dropped
+  assert.equal(m.view(0)[0].resolved, true);
+});
+
+test('Model: a resolve intent survives a lagging server, clears when the server agrees, expires after the TTL', () => {
+  const m = new Model();
+  m.applyFetch(m.nextTicket(), [cm('a')]);
+  m.setIntent('a', true, 1000);
+  assert.equal(m.view(1001)[0].resolved, true); // optimistic
+  m.applyFetch(m.nextTicket(), [cm('a', false)]); // server lags: still open
+  assert.equal(m.view(1002)[0].resolved, true); // still shown resolved
+  assert.equal(m.view(1000 + INTENT_TTL_MS)[0].resolved, false); // gave up waiting: server wins
+  m.setIntent('a', true, 5000);
+  m.applyFetch(m.nextTicket(), [cm('a', true)]); // server caught up: intent dropped
+  m.applyFetch(m.nextTicket(), [cm('a', false)]); // later reopened elsewhere
+  assert.equal(m.view(5001)[0].resolved, false);
+  m.setIntent('a', true, 6000);
+  m.clearIntent('a', true); // write failed: rolled back
+  assert.equal(m.view(6001)[0].resolved, false);
+  m.setIntent('a', true, 7000);
+  m.setIntent('a', false, 7001); // user changed their mind
+  m.clearIntent('a', true); // the first write fails: must not erase the newer intent
+  assert.equal(m.view(7002)[0].resolved, false);
+  m.clearIntent('a', false);
+});
+
+test('Model.reset makes in-flight fetches stale', () => {
+  const m = new Model();
+  const t = m.nextTicket();
+  m.reset();
+  assert.equal(m.applyFetch(t, [cm('a')]), false);
+  assert.deepEqual(m.view(0), []);
+});
+
+test('cache: only a well-formed cache for the same project is accepted', () => {
+  const file = serializeCache('P1', [cm('a')], 123);
+  assert.equal(parseCache(file, 'P1')?.comments.length, 1);
+  assert.equal(parseCache(file, 'P2'), undefined); // another project
+  assert.equal(parseCache(file, undefined)?.at, 123); // project unknown yet: accept for a first paint
+  assert.equal(parseCache([cm('a')], 'P1'), undefined); // old unversioned format (a bare array)
+  assert.equal(parseCache({ v: 1, projectId: 'P1', at: 1, comments: [{ nope: 1 }] }, 'P1'), undefined);
+  assert.equal(parseCache(null, 'P1'), undefined);
+});
+
+test('htmlSafe neutralises tags and entities; authorOf tolerates a missing message', () => {
+  assert.equal(htmlSafe('<img src="x"> a&b'), '&lt;img src="x"&gt; a&amp;b');
+  assert.equal(authorOf(undefined), 'unknown');
+  assert.equal(authorOf({ id: '1', content: '', user: { first_name: 'Ada', last_name: 'L' } }), 'Ada L');
+});
+
+test('Model.seed shows cached data without beating a real fetch', () => {
+  const m = new Model();
+  const fetchTicket = m.nextTicket();
+  m.seed([cm('old')]); // cache first paint while the fetch is still in flight
+  assert.deepEqual(m.view(0).map(c => c.threadId), ['old']);
+  assert.equal(m.applyFetch(fetchTicket, [cm('new')]), true); // the fetch still lands
+  assert.deepEqual(m.view(0).map(c => c.threadId), ['new']);
 });

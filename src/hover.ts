@@ -8,8 +8,11 @@ export const MAX_CHARS = 400; // per message
 // Mid-tone colors readable on both dark and light themes.
 const PALETTE = ['#e5534b', '#f0883e', '#d4a72c', '#57ab5a', '#39c5cf', '#539bf5', '#986ee2', '#e275ad', '#8ddb8c', '#c69026'];
 
-export const authorOf = (m: CommentMessage): string =>
-  m.user?.name ?? ([m.user?.first_name, m.user?.last_name].filter(Boolean).join(' ') || m.user?.email || 'unknown');
+export const authorOf = (m?: CommentMessage): string =>
+  m?.user?.name ?? ([m?.user?.first_name, m?.user?.last_name].filter(Boolean).join(' ') || m?.user?.email || 'unknown');
+
+/** The hover renders HTML (for the colored author span), and MarkdownString.appendText does not escape < or &. */
+export const htmlSafe = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Stable per-user color: the same person always gets the same one. */
 export function colorOf(m: CommentMessage): string {

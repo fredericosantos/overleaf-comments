@@ -15,6 +15,12 @@ export async function run(): Promise<void> {
   const root = vscode.workspace.workspaceFolders![0].uri;
   const ext = vscode.extensions.getExtension<ExtensionApi>('fredericosantos.overleaf-comments')!;
   const api = await ext.activate();
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  // Settings first: changing them makes the extension reload, so let that finish before any step runs.
+  const conf = vscode.workspace.getConfiguration('overleafComments');
+  await conf.update('projectId', '0123456789abcdef01234567', vscode.ConfigurationTarget.Global);
+  await conf.update('baseUrl', 'http://127.0.0.1:9', vscode.ConfigurationTarget.Global); // unreachable on purpose (step 6)
+  await sleep(500);
   const uri = vscode.Uri.joinPath(root, 'chap/f10.tex');
   const doc = await vscode.workspace.openTextDocument(uri);
   const text = doc.getText();
@@ -22,10 +28,13 @@ export async function run(): Promise<void> {
   const gamma = text.indexOf('gamma delta');
   const mine = () => api.threads().filter(t => t.uri === uri.toString());
 
-  // 1. render: threads on the right lines, replies kept, resolved state mapped, none dropped or duplicated
-  await api.render(root, [comment('a', 'quick brown', quick), comment('b', 'gamma delta', gamma, true)]);
-  await api.render(root, [comment('a', 'quick brown', quick), comment('b', 'gamma delta', gamma, true)]); // second render must replace, not add
-  assert.deepEqual(mine().map(t => [t.line, t.resolved, t.messages]), [[1, false, 2], [2, true, 2]]);
+  // 1. render: open threads on the right lines, replies kept, none dropped or duplicated; a resolved comment only in the sidebar
+  const finalAt = text.indexOf('Final');
+  const seed1 = () => api.render(root, [comment('a', 'quick brown', quick), comment('b', 'gamma delta', gamma), comment('r', 'Final', finalAt, true)]);
+  await seed1();
+  await seed1(); // a second render must update in place, not add
+  assert.deepEqual(mine().map(t => [t.line, t.messages]), [[1, 2], [2, 2]]);
+  assert.deepEqual(api.tree(), [{ file: 'chap/f10.tex', threads: ['c1', 'c1', '[resolved] c1'] }]);
 
   // 2. edit above: threads follow their text
   const top = new vscode.WorkspaceEdit();
@@ -52,14 +61,12 @@ export async function run(): Promise<void> {
   assert.match(api.status(), /cached/); // and the user is told it is stale
 
   // 6. real network failure (cookie present, server unreachable): cached comments stay and are marked stale
-  await vscode.workspace.getConfiguration('overleafComments').update('baseUrl', 'http://127.0.0.1:9', vscode.ConfigurationTarget.Global);
   await api.storeCookie('not-a-real-cookie');
   await api.seedCacheAndRefresh([comment('f', 'Final', doc.getText().indexOf('Final'))], true);
   assert.equal(api.threads().filter(t => t.uri === uri.toString()).length, 1);
   assert.match(api.status(), /cached/);
 
   // 7-9. write path with a fake client: reply, new comment (anchored by occurrence), resolve
-  await vscode.workspace.getConfiguration('overleafComments').update('projectId', '0123456789abcdef01234567', vscode.ConfigurationTarget.Global);
   const calls: unknown[][] = [];
   api.useClient({
     listComments: async () => [],
@@ -125,7 +132,6 @@ export async function run(): Promise<void> {
 
   // optimistic UI: nothing disappears while Overleaf syncs, resolve looks done at once, failures roll back
   {
-    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
     const server = { messages: [msg('c1'), msg('reply')], resolved: false };
     let fail = false;
     let gate: Promise<void> = Promise.resolve();
@@ -215,17 +221,18 @@ export async function run(): Promise<void> {
   const at2 = doc.getText().indexOf('brand new local text');
   const rng = () => new vscode.Range(doc.positionAt(at2), doc.positionAt(at2 + 'brand new local text'.length));
 
+  const remoteBefore = bare('rev-parse', 'main');
   api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d });
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.newThread(uri, rng()), text: 'declined' });
   await api.idle();
   assert.equal(calls.length, 0);
-  assert.throws(() => bare('log', '--oneline'), 'nothing may be pushed when the user declines');
+  assert.equal(bare('rev-parse', 'main'), remoteBefore, 'nothing may be pushed when the user declines');
 
   api.setPrompts({ confirmPush: async () => true, commitMessage: async d => `${d} (test)` });
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.newThread(uri, rng()), text: 'accepted' });
   await api.idle();
   assert.equal(calls.length, 1, 'comment added after the push');
   assert.match(git('log', '--format=%s', '-1'), /^Update chap\/f10\.tex \(test\)$/);
-  assert.equal(bare('log', '--format=%s', '-1'), git('log', '--format=%s', '-1'), 'remote has the commit');
+  assert.equal(bare('log', '--format=%s', '-1', 'main'), git('log', '--format=%s', '-1'), 'remote has the commit');
   assert.equal(doc.isDirty, false, 'file saved before committing');
 }

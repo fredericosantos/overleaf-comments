@@ -2,7 +2,7 @@
 // (open comments only: resolved ones are shown in the sidebar) and a hover with the thread's text.
 import * as vscode from 'vscode';
 import type { ProjectComment } from '@aloth/olcli';
-import { hoverContent, actionLinks, HOVER_COMMANDS } from './hover.ts';
+import { hoverContent, actionLinks, htmlSafe, HOVER_COMMANDS } from './hover.ts';
 import { highlightShape } from './anchor.ts';
 
 export interface MarkerEntry { thread: vscode.CommentThread; comment: ProjectComment }
@@ -37,13 +37,13 @@ export class Highlights implements vscode.Disposable {
   private hoverText(e: MarkerEntry): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.isTrusted = { enabledCommands: HOVER_COMMANDS }; // lets the Reply/Resolve links run our commands only
-    md.supportHtml = true; // only for the colored <span> around each author; message text goes through appendText (escaped)
+    md.supportHtml = true; // for the colored <span> around each author; every piece of user text goes through htmlSafe first
     md.appendMarkdown(`**Overleaf thread** · ${actionLinks(e.comment)}\n\n`);
     const { lines, hidden, hiddenAt } = hoverContent(e.comment);
     lines.forEach((l, i) => {
       if (hidden && i === hiddenAt) md.appendMarkdown(`*… ${hidden} more message${hidden === 1 ? '' : 's'} hidden — open the thread from the comment icon or the side panel …*\n\n`);
-      md.appendMarkdown(`<span style="color:${l.color};">**`).appendText(l.author).appendMarkdown('**</span>\n\n');
-      md.appendText(l.text).appendMarkdown('\n\n');
+      md.appendMarkdown(`<span style="color:${l.color};">**`).appendText(htmlSafe(l.author)).appendMarkdown('**</span>\n\n');
+      md.appendText(htmlSafe(l.text)).appendMarkdown('\n\n');
     });
     return md;
   }

@@ -142,7 +142,7 @@
         {
           "command": "overleafComments.resolve",
           "group": "navigation",
-          "when": "commentController == overleaf"
+          "when": "commentController == overleaf && commentThread == open"
         },
         {
           "command": "overleafComments.close",
@@ -188,14 +188,26 @@
       "overleafComments": [
         {
           "id": "overleafComments.threads",
-          "name": "Threads"
+          "name": "Threads",
+          "when": "overleafComments.active"
         }
       ]
     },
     "viewsWelcome": [
       {
         "view": "overleafComments.threads",
-        "contents": "No comments loaded.\n[Set Session Cookie](command:overleafComments.setCookie)\n[Refresh](command:overleafComments.refresh)"
+        "contents": "Not signed in to Overleaf yet.\n[Set Session Cookie](command:overleafComments.setCookie)",
+        "when": "!overleafComments.hasCookie"
+      },
+      {
+        "view": "overleafComments.threads",
+        "contents": "Could not load comments (offline, or the cookie expired).\n[Refresh](command:overleafComments.refresh)\n[Set Session Cookie](command:overleafComments.setCookie)",
+        "when": "overleafComments.hasCookie && overleafComments.loadFailed"
+      },
+      {
+        "view": "overleafComments.threads",
+        "contents": "No comments in this project.\n[Refresh](command:overleafComments.refresh)",
+        "when": "overleafComments.hasCookie && !overleafComments.loadFailed"
       }
     ],
     "configurationDefaults": {

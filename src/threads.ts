@@ -1,0 +1,157 @@
+// The editor side: one comment thread per OPEN comment (resolved ones live only in the sidebar), kept in place across
+// refreshes, re-anchored as the file is edited, with the highlight/hover markers on top.
+import * as vscode from 'vscode';
+import type { ProjectComment, CommentMessage } from '@aloth/olcli';
+import { locate, lfView, shiftAnchor } from './anchor.ts';
+import { authorOf } from './hover.ts';
+import { Highlights } from './markers.ts';
+import type { Model } from './model.ts';
+import type { Session } from './session.ts';
+import { ANCHOR_LOST, range, workspaceRoot, type Entry } from './common.ts';
+
+const toComment = (m: CommentMessage): vscode.Comment => ({
+  author: { name: authorOf(m) },
+  body: new vscode.MarkdownString(m.content),
+  mode: vscode.CommentMode.Preview,
+  timestamp: m.timestamp ? new Date(m.timestamp) : undefined,
+});
+const signature = (c: ProjectComment) => c.messages.map(m => `${m.id}\u0000${m.content}`).join('\u0001');
+
+export class Threads implements vscode.Disposable {
+  readonly controller = vscode.comments.createCommentController('overleaf', 'Overleaf');
+  readonly highlights = new Highlights(() => this.entries);
+  entries: Entry[] = [];
+  /** Optimistic replies not yet confirmed, per thread: renders keep showing them until the server's list has the same text. */
+  readonly pendingReplies = new Map<string, { opt: vscode.Comment; text: string }[]>();
+  /** New-comment placeholders waiting for their real thread to render. */
+  private readonly lingering = new Map<string, vscode.CommentThread>();
+  private renderGen = 0;
+  private warnedMissing = '';
+
+  /** `onChange`: called whenever the set or position of threads changed (the sidebar redraws). */
+  constructor(private readonly model: Model, private readonly output: vscode.OutputChannel, session: Session, private readonly onChange: () => void) {
+    this.controller.commentingRangeProvider = {
+      provideCommentingRanges: doc => (session.isOverleaf !== false && doc.uri.scheme === 'file' && /\.tex$/i.test(doc.uri.fsPath) && doc.lineCount ? [new vscode.Range(0, 0, doc.lineCount - 1, 0)] : []),
+    };
+  }
+
+  byId = (id: string) => this.entries.find(e => e.comment.threadId === id);
+
+  /** The server's messages, plus our own replies that are still being sent (unless the server already has them). */
+  private withPending = (c: ProjectComment): vscode.Comment[] => [
+    ...c.messages.map(toComment),
+    ...(this.pendingReplies.get(c.threadId) ?? []).filter(p => !c.messages.some(m => m.content === p.text)).map(p => p.opt),
+  ];
+
+  /** VS Code can leave a thread's gutter marker undrawn in an editor that was already open when the thread was created;
+   * re-assigning the range redraws it. Unverified workaround (it was added without being able to reproduce on demand). */
+  redraw(uri?: vscode.Uri): void {
+    for (const e of this.entries) if (!uri || e.thread.uri.toString() === uri.toString()) e.thread.range = new vscode.Range(e.thread.range.start, e.thread.range.end);
+  }
+
+  /** Keep a placeholder alive until a render shows the real thread for `threadId`. */
+  linger(threadId: string, temp: vscode.CommentThread): void {
+    this.lingering.set(threadId, temp);
+  }
+
+  async render(): Promise<void> {
+    const root = workspaceRoot();
+    if (!root) return;
+    const gen = ++this.renderGen;
+    const open = this.model.view(Date.now()).filter(c => !c.resolved); // resolved comments are not drawn in the editor
+    // Open every document first, then swap threads in one step; a newer render supersedes this one.
+    const docs = await Promise.all(open.map(async c => {
+      const uri = vscode.Uri.joinPath(root, c.path.replace(/^\/+/, ''));
+      try {
+        return { c, uri, doc: await vscode.workspace.openTextDocument(uri) };
+      } catch (err) {
+        this.output.appendLine(`skip ${c.path}: ${err}`);
+        return undefined;
+      }
+    }));
+    if (gen !== this.renderGen) return;
+    const missing = docs.flatMap((d, i) => (d ? [] : [open[i].path])).sort().join(', ');
+    if (missing && missing !== this.warnedMissing) void vscode.window.showWarningMessage(`Overleaf Comments: comment thread(s) hidden because their file is not in this workspace (git pull?): ${missing}`);
+    this.warnedMissing = missing;
+    // Update existing threads in place (no tear-down), so nothing blinks and open/closed state is kept.
+    const old = new Map(this.entries.map(e => [e.comment.threadId, e]));
+    const next: Entry[] = [];
+    for (const d of docs) {
+      if (!d) continue;
+      const { c, uri, doc } = d;
+      let prev = old.get(c.threadId);
+      old.delete(c.threadId);
+      if (prev && prev.thread.uri.toString() !== uri.toString()) { prev.thread.dispose(); prev = undefined; }
+      const v = lfView(doc.getText());
+      let start: number;
+      let end: number;
+      let found = true;
+      if (prev && v.lf.slice(v.fromDoc(prev.start), v.fromDoc(prev.end)) === c.selectedText) {
+        ({ start, end } = prev); // already placed and still matching: do not re-search by Overleaf's older offset
+      } else {
+        const a = locate(v.lf, c.position, c.selectedText);
+        found = a.found;
+        start = v.toDoc(a.start);
+        end = v.toDoc(a.end);
+      }
+      const where = range(doc, start, end);
+      const thread = prev?.thread ?? this.controller.createCommentThread(uri, where, this.withPending(c));
+      if (prev) {
+        // Only touch what changed: re-assigning comments would drop an optimistic "Syncing…" reply for nothing.
+        if (signature(prev.comment) !== signature(c)) thread.comments = this.withPending(c);
+        if (!thread.range.isEqual(where)) thread.range = where;
+      }
+      thread.canReply = true;
+      thread.contextValue = 'open';
+      thread.label = found ? undefined : ANCHOR_LOST;
+      next.push({ thread, comment: c, start, end });
+      const waiting = this.lingering.get(c.threadId);
+      if (waiting) { waiting.dispose(); this.lingering.delete(c.threadId); }
+    }
+    old.forEach(e => e.thread.dispose());
+    this.entries = next;
+    this.onChange();
+    for (const e of vscode.window.visibleTextEditors) this.redraw(e.document.uri);
+    this.highlights.apply();
+  }
+
+  /** Drop every thread (Clear Session Cookie); a render in flight becomes stale. */
+  clear(): void {
+    ++this.renderGen;
+    this.entries.forEach(e => e.thread.dispose());
+    this.entries = [];
+    this.highlights.apply();
+    this.onChange();
+  }
+
+  /** Move threads with the user's edits instead of re-searching the whole file on every keystroke. */
+  onTextChange(e: vscode.TextDocumentChangeEvent): void {
+    const uri = e.document.uri.toString();
+    const mine = this.entries.filter(x => x.thread.uri.toString() === uri);
+    if (!mine.length || !e.contentChanges.length) return;
+    const changes = e.contentChanges.map(c => ({ offset: c.rangeOffset, length: c.rangeLength, text: c.text }));
+    const v = lfView(e.document.getText());
+    for (const x of mine) {
+      let { start, end } = shiftAnchor(x.start, x.end, changes);
+      let found = true;
+      if (v.lf.slice(v.fromDoc(start), v.fromDoc(end)) !== x.comment.selectedText) {
+        // The edit touched the anchor's text: look for it again, nearest to where it was.
+        const a = locate(v.lf, v.fromDoc(start), x.comment.selectedText);
+        found = a.found;
+        start = v.toDoc(a.start);
+        end = v.toDoc(a.end);
+      }
+      x.start = start;
+      x.end = end;
+      x.thread.range = range(e.document, start, end);
+      x.thread.label = found ? undefined : ANCHOR_LOST;
+    }
+    this.highlights.apply();
+    this.onChange();
+  }
+
+  dispose(): void {
+    this.controller.dispose();
+    this.highlights.dispose();
+  }
+}

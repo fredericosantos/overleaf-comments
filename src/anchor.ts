@@ -51,3 +51,84 @@ export function highlightShape(start: { line: number; character: number }, end: 
   const blank = start.line === lastLine && end.line > start.line; // only a line break: nothing to underline, so mark the line
   return { kind: lastLine > start.line || blank ? 'lines' : 'text', lastLine };
 }
+
+/**
+ * Overleaf documents use "\n"; a local file may use "\r\n". Anchors are matched in "\n" space and mapped back, so
+ * multi-line anchors and offsets stay right on CRLF files. Identity (and free) when the text has no "\r\n".
+ */
+export interface LfView {
+  lf: string;
+  /** document offset -> "\n"-space offset */
+  fromDoc(offset: number): number;
+  /** "\n"-space offset -> document offset */
+  toDoc(offset: number): number;
+}
+
+export function lfView(text: string): LfView {
+  if (!text.includes('\r\n')) return { lf: text, fromDoc: o => o, toDoc: o => o };
+  const crs: number[] = []; // document offsets of every "\r" that belongs to a "\r\n"
+  for (let i = text.indexOf('\r\n'); i !== -1; i = text.indexOf('\r\n', i + 2)) crs.push(i);
+  return {
+    lf: text.replace(/\r\n/g, '\n'),
+    fromDoc: o => o - crs.filter(c => c < o).length,
+    toDoc: o => {
+      let d = o;
+      for (const c of crs) { if (c < d) d++; else break; }
+      return d;
+    },
+  };
+}
+
+export interface TextChange { offset: number; length: number; text: string }
+
+/**
+ * Move an anchor [start, end) through one editor change event (all changes are in pre-change coordinates).
+ * `touched` = a change overlapped the anchor or edited inside it, so the caller must re-verify its text.
+ * Text typed exactly at either boundary stays outside the anchor.
+ */
+export function shiftAnchor(start: number, end: number, changes: TextChange[]): { start: number; end: number; touched: boolean } {
+  let s = start;
+  let e = end;
+  let touched = false;
+  for (const c of changes) {
+    const cs = c.offset;
+    const ce = c.offset + c.length;
+    const delta = c.text.length - c.length;
+    if (ce <= start) s += delta;
+    if (ce < end || (ce === end && cs < ce)) e += delta;
+    if (cs < end && ce > start) touched = true; // overlaps (or edits inside) the anchor
+  }
+  return { start: s, end: Math.max(s, e), touched };
+}
+
+/**
+ * What to tell Overleaf when the user comments on [startOffset, endOffset) of `text` (both in `text`'s own offsets):
+ * the selected text, or, with nothing selected, the line's text, or for a blank line its line break. `occurrence` is
+ * which match of that text (counted like olcli: left to right, non-overlapping) the anchor is, so Overleaf picks the
+ * same one. Everything is in "\n" space, so CRLF files work.
+ */
+export function anchorAt(text: string, startOffset: number, endOffset: number): { selectedText: string; occurrence: number } | undefined {
+  const v = lfView(text);
+  const lf = v.lf;
+  const a = v.fromDoc(startOffset);
+  const b = v.fromDoc(endOffset);
+  let selected = lf.slice(a, b);
+  let at = a;
+  if (!selected.trim()) {
+    const lineStart = lf.lastIndexOf('\n', a - 1) + 1;
+    const nl = lf.indexOf('\n', a);
+    const lineEnd = nl === -1 ? lf.length : nl;
+    const line = lf.slice(lineStart, lineEnd);
+    if (line.trim()) {
+      selected = line.trim();
+      at = lineStart + (line.length - line.trimStart().length);
+    } else if (nl !== -1) {
+      selected = '\n'; // blank line: Overleaf wants a non-empty range, so use its line break
+      at = nl;
+    } else {
+      return undefined;
+    }
+  }
+  const occurrence = occurrenceAt(lf, at, selected);
+  return occurrence === undefined ? undefined : { selectedText: selected, occurrence };
+}
