@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { locate, occurrenceAt, highlightShape, lfView, shiftAnchor, anchorAt } from '../src/anchor.ts';
 import { projectIdFromRemote } from '../src/project.ts';
-import { hoverContent, colorOf, actionLinks, htmlSafe, authorOf, MAX_CHARS, MAX_SHOWN } from '../src/hover.ts';
+import { hoverContent, colorOf, actionLinks, htmlSafe, authorOf, clipForThread, COLLAPSE_LINES, COLLAPSE_CHARS, MAX_CHARS, MAX_SHOWN } from '../src/hover.ts';
 
 const id = '6acf64d6fe2f2fd26f343c60';
 
@@ -166,4 +166,20 @@ test('Model.seed shows cached data without beating a real fetch', () => {
   assert.deepEqual(m.view(0).map(c => c.threadId), ['old']);
   assert.equal(m.applyFetch(fetchTicket, [cm('new')]), true); // the fetch still lands
   assert.deepEqual(m.view(0).map(c => c.threadId), ['new']);
+});
+
+test('clipForThread: short comments untouched, long ones cut with an ellipsis, expanded ones whole, code fences closed', () => {
+  assert.deepEqual(clipForThread('short', false), { text: 'short', clipped: false, long: false });
+  const manyLines = Array.from({ length: COLLAPSE_LINES + 4 }, (_, i) => `line ${i}`).join('\n');
+  const c1 = clipForThread(manyLines, false);
+  assert.equal(c1.clipped, true);
+  assert.equal(c1.text.split('\n').length, COLLAPSE_LINES);
+  assert.ok(c1.text.endsWith(' …'));
+  assert.equal(clipForThread(manyLines, true).text, manyLines); // expanded: all of it
+  assert.equal(clipForThread(manyLines, true).long, true); // still offers "Show less"
+  const c2 = clipForThread('word '.repeat(300), false);
+  assert.ok(c2.text.length <= COLLAPSE_CHARS + 3 && c2.clipped);
+  const fenced = 'intro\n```\n' + 'x\n'.repeat(20) + '```\n';
+  assert.equal((clipForThread(fenced, false).text.match(/```/g) ?? []).length % 2, 0, 'the clipped text must not leave a code block open');
+  assert.equal(clipForThread('a\r\nb', false).text, 'a\nb');
 });

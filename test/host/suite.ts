@@ -80,6 +80,28 @@ export async function run(): Promise<void> {
   await seed();
   assert.deepEqual(api.tree(), [{ file: 'chap/f10.tex', threads: ['c1'] }]); // sidebar tree mirrors the thread
   {
+    // a long comment is collapsed in the thread; Show more expands it; the header button expands/collapses all
+    const long = { ...comment('L1', 'gamma delta', doc.getText().indexOf('gamma delta')), messages: [msg(Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n')), msg('short reply')] };
+    await api.render(root, [long]);
+    const body = (i: number) => (api.thread(0).comments[i].body as vscode.MarkdownString).value;
+    assert.match(body(0), /\[Show more…\]\(command:overleafComments\.toggleMessage\?/);
+    assert.ok(!body(0).includes('line 11'), 'collapsed: the tail is not shown');
+    assert.ok(!body(1).includes('Show'), 'a short comment has no link');
+    assert.equal(api.thread(0).contextValue, 'openLong', 'the header offers Show entire comments');
+    await vscode.commands.executeCommand('overleafComments.toggleMessage', 'L1', long.messages[0].id);
+    assert.match(body(0), /\[Show less\]/);
+    assert.ok(body(0).includes('line 11'), 'expanded: all of it');
+    await vscode.commands.executeCommand('overleafComments.toggleMessage', 'L1', long.messages[0].id);
+    assert.match(body(0), /Show more…/);
+    await vscode.commands.executeCommand('overleafComments.showAll', api.thread(0));
+    assert.ok(body(0).includes('line 11'), 'Show entire comments expands everything');
+    assert.equal(api.thread(0).contextValue, 'openLongExpanded', 'and the header now offers Collapse comments');
+    await vscode.commands.executeCommand('overleafComments.collapseAll', api.thread(0));
+    assert.ok(!body(0).includes('line 11'));
+    assert.equal(api.thread(0).contextValue, 'openLong');
+    await seed();
+  }
+  {
     // a click elsewhere in the text closes an open comment; a click inside its own text leaves it open
     const th = api.thread(0);
     const r0 = th.range;

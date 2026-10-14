@@ -3,18 +3,15 @@
 import * as vscode from 'vscode';
 import type { ProjectComment, CommentMessage } from '@aloth/olcli';
 import { locate, lfView, shiftAnchor } from './anchor.ts';
-import { authorOf } from './hover.ts';
+import { authorOf, clipForThread } from './hover.ts';
 import { Highlights } from './markers.ts';
 import type { Model } from './model.ts';
 import type { Session } from './session.ts';
 import { ANCHOR_LOST, range, workspaceRoot, type Entry } from './common.ts';
 
-const toComment = (m: CommentMessage): vscode.Comment => ({
-  author: { name: authorOf(m) },
-  body: new vscode.MarkdownString(m.content),
-  mode: vscode.CommentMode.Preview,
-  timestamp: m.timestamp ? new Date(m.timestamp) : undefined,
-});
+const TOGGLE = 'overleafComments.toggleMessage';
+/** The thread's context value: which header buttons apply. Long = some comment is collapsible. */
+const contextFor = (hasLong: boolean, allExpanded: boolean) => (!hasLong ? 'open' : allExpanded ? 'openLongExpanded' : 'openLong');
 const signature = (c: ProjectComment) => c.messages.map(m => `${m.id}\u0000${m.content}`).join('\u0001');
 
 export class Threads implements vscode.Disposable {
@@ -25,6 +22,10 @@ export class Threads implements vscode.Disposable {
   readonly pendingReplies = new Map<string, { opt: vscode.Comment; text: string }[]>();
   /** New-comment placeholders waiting for their real thread to render. */
   private readonly lingering = new Map<string, vscode.CommentThread>();
+  /** Long comments the user expanded with their own Show more link (key: threadId:messageId). */
+  private readonly expanded = new Set<string>();
+  /** Threads where the user pressed "Show entire comments". */
+  private readonly allExpanded = new Set<string>();
   private renderGen = 0;
   private warnedMissing = '';
 
@@ -37,9 +38,47 @@ export class Threads implements vscode.Disposable {
 
   byId = (id: string) => this.entries.find(e => e.comment.threadId === id);
 
+  private hasLong = (c: ProjectComment) => c.messages.some(m => clipForThread(m.content, false).long);
+  private contextValue = (c: ProjectComment) => contextFor(this.hasLong(c), this.allExpanded.has(c.threadId));
+
+  /** One comment as shown in the thread: long ones are cut to a few lines with a Show more / Show less link. */
+  private toComment(c: ProjectComment, m: CommentMessage): vscode.Comment {
+    const open = this.allExpanded.has(c.threadId) || this.expanded.has(`${c.threadId}:${m.id}`);
+    const { text, long } = clipForThread(m.content, open);
+    const body = new vscode.MarkdownString(text);
+    if (long) {
+      body.isTrusted = { enabledCommands: [TOGGLE] }; // only so that the link below can run our own command
+      body.appendMarkdown(`\n\n[${open ? 'Show less' : 'Show more…'}](command:${TOGGLE}?${encodeURIComponent(JSON.stringify([c.threadId, m.id]))})`);
+    }
+    return { author: { name: authorOf(m) }, body, mode: vscode.CommentMode.Preview, timestamp: m.timestamp ? new Date(m.timestamp) : undefined };
+  }
+
+  private redrawComments(e: Entry): void {
+    e.thread.comments = this.withPending(e.comment);
+    e.thread.contextValue = this.contextValue(e.comment);
+  }
+
+  /** Show more / Show less on one comment. */
+  toggleMessage(threadId: string, messageId: string): void {
+    const key = `${threadId}:${messageId}`;
+    if (!this.expanded.delete(key)) this.expanded.add(key);
+    const e = this.byId(threadId);
+    if (e) this.redrawComments(e);
+  }
+
+  /** The thread-header button: show every comment of the thread in full, or collapse them again. */
+  toggleAll(thread: vscode.CommentThread): void {
+    const e = this.entries.find(x => x.thread === thread);
+    if (!e) return;
+    const id = e.comment.threadId;
+    if (!this.allExpanded.delete(id)) this.allExpanded.add(id);
+    for (const m of e.comment.messages) this.expanded.delete(`${id}:${m.id}`); // the per-comment choices start over
+    this.redrawComments(e);
+  }
+
   /** The server's messages, plus our own replies that are still being sent (unless the server already has them). */
   private withPending = (c: ProjectComment): vscode.Comment[] => [
-    ...c.messages.map(toComment),
+    ...c.messages.map(m => this.toComment(c, m)),
     ...(this.pendingReplies.get(c.threadId) ?? []).filter(p => !c.messages.some(m => m.content === p.text)).map(p => p.opt),
   ];
 
@@ -102,7 +141,7 @@ export class Threads implements vscode.Disposable {
         if (!thread.range.isEqual(where)) thread.range = where;
       }
       thread.canReply = true;
-      thread.contextValue = 'open';
+      thread.contextValue = this.contextValue(c);
       thread.label = found ? undefined : ANCHOR_LOST;
       next.push({ thread, comment: c, start, end });
       const waiting = this.lingering.get(c.threadId);

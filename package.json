@@ -69,6 +69,20 @@
       {
         "command": "overleafComments.hoverResolve",
         "title": "Overleaf Comments: hoverResolve"
+      },
+      {
+        "command": "overleafComments.toggleMessage",
+        "title": "Overleaf Comments: toggleMessage"
+      },
+      {
+        "command": "overleafComments.showAll",
+        "title": "Show entire comments",
+        "icon": "$(unfold)"
+      },
+      {
+        "command": "overleafComments.collapseAll",
+        "title": "Collapse comments",
+        "icon": "$(fold)"
       }
     ],
     "configuration": {
@@ -129,6 +143,18 @@
         {
           "command": "overleafComments.hoverResolve",
           "when": "false"
+        },
+        {
+          "command": "overleafComments.toggleMessage",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.showAll",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.collapseAll",
+          "when": "false"
         }
       ],
       "comments/commentThread/context": [
@@ -142,12 +168,22 @@
         {
           "command": "overleafComments.resolve",
           "group": "navigation",
-          "when": "commentController == overleaf && commentThread == open"
+          "when": "commentController == overleaf && commentThread =~ /^open/"
         },
         {
           "command": "overleafComments.close",
           "group": "navigation@9",
           "when": "commentController == overleaf"
+        },
+        {
+          "command": "overleafComments.showAll",
+          "group": "navigation@1",
+          "when": "commentController == overleaf && commentThread == openLong"
+        },
+        {
+          "command": "overleafComments.collapseAll",
+          "group": "navigation@1",
+          "when": "commentController == overleaf && commentThread == openLongExpanded"
         }
       ],
       "view/item/context": [

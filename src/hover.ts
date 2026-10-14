@@ -47,3 +47,19 @@ export function actionLinks(c: ProjectComment): string {
   const arg = encodeURIComponent(JSON.stringify([c.threadId]));
   return `[Reply](command:overleafComments.hoverReply?${arg}) · [Resolve](command:overleafComments.hoverResolve?${arg})`;
 }
+
+/** A comment longer than this many lines or characters is collapsed in the thread, with "Show more" (like Overleaf). */
+export const COLLAPSE_LINES = 5;
+export const COLLAPSE_CHARS = 400;
+
+/** The text to show for a comment in the thread: all of it, or its first lines when it is long and not expanded. */
+export function clipForThread(text: string, expanded: boolean): { text: string; clipped: boolean; long: boolean } {
+  const t = text.replace(/\r\n/g, '\n').trimEnd();
+  const long = t.split('\n').length > COLLAPSE_LINES || t.length > COLLAPSE_CHARS;
+  if (!long || expanded) return { text: t, clipped: false, long };
+  let cut = t.split('\n').slice(0, COLLAPSE_LINES).join('\n');
+  if (cut.length > COLLAPSE_CHARS) cut = cut.slice(0, COLLAPSE_CHARS).replace(/\s+\S*$/, ''); // back to a word boundary
+  cut = cut.trimEnd();
+  if ((cut.match(/```/g) ?? []).length % 2 === 1) cut += '\n```'; // do not leave a code block open
+  return { text: `${cut} …`, clipped: true, long };
+}
