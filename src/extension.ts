@@ -75,6 +75,13 @@ export function activate(ctx: vscode.ExtensionContext) {
     output,
     vscode.commands.registerCommand('overleafComments.refresh', () =>
       vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Overleaf comments' }, () => refresh())),
+    vscode.commands.registerCommand('overleafComments.clearCookie', async () => {
+      await ctx.secrets.delete(COOKIE_KEY);
+      await ctx.workspaceState.update(CACHE_KEY, undefined);
+      client = undefined;
+      threads.forEach(t => t.dispose());
+      threads = [];
+    }),
     vscode.commands.registerCommand('overleafComments.setCookie', async () => {
       const v = await vscode.window.showInputBox({
         prompt: 'overleaf_session2 cookie value (browser devtools → cookies)',

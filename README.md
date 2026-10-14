@@ -19,6 +19,10 @@ Settings: `overleafComments.projectId` (override git-remote detection), `overlea
 Anchors are matched by the commented text, nearest to Overleaf's offset; if you edited that text
 locally the thread is labelled "anchor lost" at its approximate position.
 
+Install a built package with `code --install-extension overleaf-comments.vsix`
+(`npx @vscode/vsce package --no-dependencies -o overleaf-comments.vsix` after building).
+**Overleaf Comments: Clear Session Cookie** removes the stored cookie and cached comments.
+
 ## Develop
 
 ```sh
