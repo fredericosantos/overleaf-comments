@@ -63,3 +63,23 @@ export function clipForThread(text: string, expanded: boolean): { text: string; 
   if ((cut.match(/```/g) ?? []).length % 2 === 1) cut += '\n```'; // do not leave a code block open
   return { text: `${cut} …`, clipped: true, long };
 }
+
+/** A thread taller than this many lines is cut: the first comment and the latest ones that fit are shown. */
+export const THREAD_MAX_LINES = 24;
+
+/** How tall a comment is in a collapsed thread: its (clipped) lines, plus the author line and the Show more line. */
+export const messageHeight = (content: string): number => clipForThread(content, false).text.split('\n').length + 2;
+
+/** Which comments of a collapsed thread to show: the first (the root) and the latest ones that fit in the budget. */
+export function visibleIndices(heights: number[], budget = THREAD_MAX_LINES): number[] {
+  const n = heights.length;
+  if (n === 0 || heights.reduce((a, b) => a + b, 0) <= budget) return heights.map((_, i) => i);
+  const keep = new Set([0]);
+  let used = heights[0];
+  for (let i = n - 1; i > 0; i--) {
+    if (i !== n - 1 && used + heights[i] > budget) break; // the latest comment is always shown
+    keep.add(i);
+    used += heights[i];
+  }
+  return [...keep].sort((a, b) => a - b);
+}

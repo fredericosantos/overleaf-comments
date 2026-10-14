@@ -102,6 +102,22 @@ export async function run(): Promise<void> {
     await seed();
   }
   {
+    // a tall thread is cut to the first and latest comments with a "hidden" marker; Show entire comments lifts the cut
+    const many = { ...comment('M1', 'gamma delta', doc.getText().indexOf('gamma delta')), messages: Array.from({ length: 10 }, (_, i) => msg(`m${i}`)) };
+    await api.render(root, [many]);
+    const th = api.thread(0);
+    const texts = () => th.comments.map(c => (c.body as vscode.MarkdownString).value);
+    assert.ok(th.comments.length < 11 && texts().some(t => t.includes('hidden')), 'cut with a marker');
+    assert.equal(texts()[0], 'm0', 'the first comment stays');
+    assert.equal(texts().at(-1), 'm9', 'the latest comment stays');
+    assert.equal(th.contextValue, 'openLong', 'the header offers Show entire comments');
+    await vscode.commands.executeCommand('overleafComments.showAll', th);
+    assert.deepEqual(texts(), Array.from({ length: 10 }, (_, i) => `m${i}`), 'everything, no marker');
+    await vscode.commands.executeCommand('overleafComments.showThread', 'M1'); // the marker link toggles back
+    assert.ok(texts().some(t => t.includes('hidden')));
+    await seed();
+  }
+  {
     // a click elsewhere in the text closes an open comment; a click inside its own text leaves it open
     const th = api.thread(0);
     const r0 = th.range;

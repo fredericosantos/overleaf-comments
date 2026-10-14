@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { locate, occurrenceAt, highlightShape, lfView, shiftAnchor, anchorAt } from '../src/anchor.ts';
 import { projectIdFromRemote } from '../src/project.ts';
-import { hoverContent, colorOf, actionLinks, htmlSafe, authorOf, clipForThread, COLLAPSE_LINES, COLLAPSE_CHARS, MAX_CHARS, MAX_SHOWN } from '../src/hover.ts';
+import { hoverContent, colorOf, actionLinks, htmlSafe, authorOf, clipForThread, visibleIndices, messageHeight, THREAD_MAX_LINES, COLLAPSE_LINES, COLLAPSE_CHARS, MAX_CHARS, MAX_SHOWN } from '../src/hover.ts';
 
 const id = '6acf64d6fe2f2fd26f343c60';
 
@@ -182,4 +182,19 @@ test('clipForThread: short comments untouched, long ones cut with an ellipsis, e
   const fenced = 'intro\n```\n' + 'x\n'.repeat(20) + '```\n';
   assert.equal((clipForThread(fenced, false).text.match(/```/g) ?? []).length % 2, 0, 'the clipped text must not leave a code block open');
   assert.equal(clipForThread('a\r\nb', false).text, 'a\nb');
+});
+
+test('visibleIndices: short threads whole; tall ones keep the first and the latest that fit; the latest is always shown', () => {
+  assert.deepEqual(visibleIndices([3, 3, 3]), [0, 1, 2]);
+  assert.deepEqual(visibleIndices([]), []);
+  const tall = Array(10).fill(3); // 30 lines > 24
+  const idx = visibleIndices(tall);
+  assert.equal(idx[0], 0);
+  assert.equal(idx.at(-1), 9);
+  assert.ok(idx.length < 10 && idx.reduce((n, i) => n + tall[i], 0) <= THREAD_MAX_LINES);
+  assert.deepEqual(idx.slice(1), Array.from({ length: idx.length - 1 }, (_, k) => 10 - (idx.length - 1) + k)); // a contiguous tail
+  assert.deepEqual(visibleIndices([3, 40, 3], 10), [0, 2]); // a huge middle comment is hidden
+  assert.deepEqual(visibleIndices([3, 3, 40], 10), [0, 2]); // the latest stays even if it alone busts the budget
+  assert.equal(messageHeight('one line'), 3);
+  assert.equal(messageHeight('x\n'.repeat(30)), COLLAPSE_LINES + 2);
 });

@@ -72,6 +72,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     command('reply', (r: Reply) => writes.onReply(r)),
     command('resolve', (t: vscode.CommentThread) => { const e = threads.entries.find(x => x.thread === t); return e && writes.track(writes.setResolved(e.comment.threadId, true)); }),
     command('toggleMessage', (threadId: string, messageId: string) => threads.toggleMessage(threadId, messageId)),
+    command('showThread', (threadId: string) => threads.toggleAll(threadId)),
     command('showAll', (t: vscode.CommentThread) => threads.toggleAll(t)), // the header shows one or the other, depending on the thread's state
     command('collapseAll', (t: vscode.CommentThread) => threads.toggleAll(t)),
     command('close', (t: vscode.CommentThread) => { t.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed; }),

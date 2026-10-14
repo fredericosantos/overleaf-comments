@@ -83,6 +83,10 @@
         "command": "overleafComments.collapseAll",
         "title": "Collapse comments",
         "icon": "$(fold)"
+      },
+      {
+        "command": "overleafComments.showThread",
+        "title": "Overleaf Comments: showThread"
       }
     ],
     "configuration": {
@@ -154,6 +158,10 @@
         },
         {
           "command": "overleafComments.collapseAll",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.showThread",
           "when": "false"
         }
       ],
@@ -247,7 +255,8 @@
       }
     ],
     "configurationDefaults": {
-      "comments.openView": "never"
+      "comments.openView": "never",
+      "comments.maxHeight": false
     }
   },
   "scripts": {

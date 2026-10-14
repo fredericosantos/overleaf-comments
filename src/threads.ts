@@ -3,13 +3,14 @@
 import * as vscode from 'vscode';
 import type { ProjectComment, CommentMessage } from '@aloth/olcli';
 import { locate, lfView, shiftAnchor } from './anchor.ts';
-import { authorOf, clipForThread } from './hover.ts';
+import { authorOf, clipForThread, messageHeight, visibleIndices } from './hover.ts';
 import { Highlights } from './markers.ts';
 import type { Model } from './model.ts';
 import type { Session } from './session.ts';
 import { ANCHOR_LOST, range, workspaceRoot, type Entry } from './common.ts';
 
 const TOGGLE = 'overleafComments.toggleMessage';
+const SHOW_THREAD = 'overleafComments.showThread';
 /** The thread's context value: which header buttons apply. Long = some comment is collapsible. */
 const contextFor = (hasLong: boolean, allExpanded: boolean) => (!hasLong ? 'open' : allExpanded ? 'openLongExpanded' : 'openLong');
 const signature = (c: ProjectComment) => c.messages.map(m => `${m.id}\u0000${m.content}`).join('\u0001');
@@ -38,8 +39,9 @@ export class Threads implements vscode.Disposable {
 
   byId = (id: string) => this.entries.find(e => e.comment.threadId === id);
 
-  private hasLong = (c: ProjectComment) => c.messages.some(m => clipForThread(m.content, false).long);
-  private contextValue = (c: ProjectComment) => contextFor(this.hasLong(c), this.allExpanded.has(c.threadId));
+  /** Something is cut: a long comment, or comments hidden by the thread's height cutoff. */
+  private isCut = (c: ProjectComment) => c.messages.some(m => clipForThread(m.content, false).long) || visibleIndices(c.messages.map(m => messageHeight(m.content))).length < c.messages.length;
+  private contextValue = (c: ProjectComment) => contextFor(this.isCut(c), this.allExpanded.has(c.threadId));
 
   /** One comment as shown in the thread: long ones are cut to a few lines with a Show more / Show less link. */
   private toComment(c: ProjectComment, m: CommentMessage): vscode.Comment {
@@ -66,9 +68,9 @@ export class Threads implements vscode.Disposable {
     if (e) this.redrawComments(e);
   }
 
-  /** The thread-header button: show every comment of the thread in full, or collapse them again. */
-  toggleAll(thread: vscode.CommentThread): void {
-    const e = this.entries.find(x => x.thread === thread);
+  /** The thread-header button (or the "Show entire thread" link): show every comment of the thread in full, or cut it again. */
+  toggleAll(thread: vscode.CommentThread | string): void {
+    const e = typeof thread === 'string' ? this.byId(thread) : this.entries.find(x => x.thread === thread);
     if (!e) return;
     const id = e.comment.threadId;
     if (!this.allExpanded.delete(id)) this.allExpanded.add(id);
@@ -76,9 +78,27 @@ export class Threads implements vscode.Disposable {
     this.redrawComments(e);
   }
 
+  /** The thread's comments: all of them when expanded, otherwise the first and the latest that fit, with a marker for the gap. */
+  private shownMessages(c: ProjectComment): vscode.Comment[] {
+    const all = this.allExpanded.has(c.threadId);
+    const idx = all ? c.messages.map((_, i) => i) : visibleIndices(c.messages.map(m => messageHeight(m.content)));
+    const out: vscode.Comment[] = [];
+    idx.forEach((i, k) => {
+      const gap = k > 0 ? i - idx[k - 1] - 1 : 0;
+      if (gap > 0) {
+        const marker = new vscode.MarkdownString(`… ${gap} more comment${gap === 1 ? '' : 's'} hidden. `);
+        marker.isTrusted = { enabledCommands: [SHOW_THREAD] };
+        marker.appendMarkdown(`[Show entire thread](command:${SHOW_THREAD}?${encodeURIComponent(JSON.stringify([c.threadId]))})`);
+        out.push({ author: { name: 'Overleaf Comments' }, body: marker, mode: vscode.CommentMode.Preview });
+      }
+      out.push(this.toComment(c, c.messages[i]));
+    });
+    return out;
+  }
+
   /** The server's messages, plus our own replies that are still being sent (unless the server already has them). */
   private withPending = (c: ProjectComment): vscode.Comment[] => [
-    ...c.messages.map(m => this.toComment(c, m)),
+    ...this.shownMessages(c),
     ...(this.pendingReplies.get(c.threadId) ?? []).filter(p => !c.messages.some(m => m.content === p.text)).map(p => p.opt),
   ];
 
