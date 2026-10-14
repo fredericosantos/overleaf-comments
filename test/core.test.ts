@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { locate } from '../src/anchor.ts';
+import { locate, occurrenceAt } from '../src/anchor.ts';
 import { projectIdFromRemote } from '../src/project.ts';
 
 const id = '6acf64d6fe2f2fd26f343c60';
@@ -20,4 +20,14 @@ test('locate: exact, shifted, lost', () => {
   assert.deepEqual(locate(t, 7, 'foo'), { start: 8, end: 11, found: true });
   assert.deepEqual(locate(t, 2, 'foo'), { start: 0, end: 3, found: true });
   assert.deepEqual(locate(t, 100, 'zzz'), { start: 15, end: 15, found: false });
+});
+
+test('occurrenceAt matches olcli scan order', () => {
+  const t = 'ab ab ab';
+  assert.equal(occurrenceAt(t, 0, 'ab'), 1);
+  assert.equal(occurrenceAt(t, 3, 'ab'), 2);
+  assert.equal(occurrenceAt(t, 6, 'ab'), 3);
+  assert.equal(occurrenceAt(t, 1, 'ab'), undefined); // not a match start
+  assert.equal(occurrenceAt('aaa', 1, 'aa'), undefined); // overlapping: olcli would pick offset 0 or none
+  assert.equal(occurrenceAt(t, 0, ''), undefined);
 });

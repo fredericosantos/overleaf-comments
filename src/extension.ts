@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { OverleafClient, type ProjectComment, type CommentMessage } from '@aloth/olcli';
-import { locate } from './anchor.ts';
+import { locate, occurrenceAt } from './anchor.ts';
 import { projectIdFromRemote } from './project.ts';
 
 const COOKIE_KEY = 'overleafComments.cookie';
@@ -20,8 +20,13 @@ export interface ExtensionApi {
   seedCacheAndRefresh(comments: ProjectComment[], fetch: boolean): Promise<void>;
   /** Test seam: store a cookie as the Set Session Cookie command would. */
   storeCookie(value: string): Promise<void>;
+  /** Test seam: replace the Overleaf client (no network). */
+  useClient(c: Pick<OverleafClient, 'listComments' | 'addComment' | 'postCommentMessage' | 'resolveComment' | 'reopenComment'>): void;
+  /** Test seam: create a thread the way the UI's "+" does (not yet known to Overleaf). */
+  newThread(uri: vscode.Uri, range: vscode.Range): vscode.CommentThread;
+  thread(i: number): vscode.CommentThread;
   status(): string;
-  threads(): { uri: string; line: number; label?: string; resolved: boolean; messages: number }[];
+  threads(): { uri: string; threadId: string; line: number; label?: string; resolved: boolean; messages: number }[];
 }
 
 export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
@@ -29,7 +34,11 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   const output = vscode.window.createOutputChannel('Overleaf Comments');
   // Each thread remembers its comment and last known offset so edits can re-anchor it.
   let threads: { thread: vscode.CommentThread; comment: ProjectComment; pos: number }[] = [];
-  let client: OverleafClient | undefined;
+  let client: Pick<OverleafClient, 'listComments' | 'addComment' | 'postCommentMessage' | 'resolveComment' | 'reopenComment'> | undefined;
+  const isTex = (doc: vscode.TextDocument) => doc.uri.scheme === 'file' && /\.tex$/i.test(doc.uri.fsPath);
+  controller.commentingRangeProvider = {
+    provideCommentingRanges: doc => (isTex(doc) && doc.lineCount ? [new vscode.Range(0, 0, doc.lineCount - 1, 0)] : []),
+  };
 
   const cfg = () => vscode.workspace.getConfiguration('overleafComments');
 
@@ -40,7 +49,9 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     return stdout.split('\n').map(projectIdFromRemote).find(Boolean);
   }
 
-  async function getClient(): Promise<OverleafClient> {
+  let injected: typeof client; // test seam: survives the error handler's `client = undefined`
+  async function getClient() {
+    if (injected) return injected;
     if (client) return client;
     const cookie = await ctx.secrets.get(COOKIE_KEY);
     if (!cookie) throw new SetupError('No session cookie. Run "Overleaf Comments: Set Session Cookie".');
@@ -72,7 +83,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       const a = locate(doc.getText(), c.position, c.selectedText);
       const range = new vscode.Range(doc.positionAt(a.start), doc.positionAt(a.end));
       const thread = controller.createCommentThread(uri, range, c.messages.map(m => toComment(m, a.found)));
-      thread.canReply = false;
+      thread.canReply = true;
+      thread.contextValue = c.resolved ? 'resolved' : 'open';
       thread.state = c.resolved ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
       thread.label = a.found ? undefined : 'Anchor lost (text edited locally)';
       threads.push({ thread, comment: c, pos: a.start });
@@ -114,6 +126,57 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }
   }
 
+  /** Run a write against Overleaf for the workspace's project, then re-fetch so the UI shows the server's state. */
+  async function write<T>(what: string, fn: (c: NonNullable<typeof client>, projectId: string) => Promise<T>): Promise<T | undefined> {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    try {
+      if (!folder) throw new SetupError('Open the Overleaf project folder first.');
+      const id = await projectId(folder.uri.fsPath);
+      if (!id) throw new SetupError('No Overleaf git remote found; set overleafComments.projectId.');
+      const result = await fn(await getClient(), id);
+      await refresh();
+      return result;
+    } catch (e) {
+      output.appendLine(`${what}: ${e}`);
+      void vscode.window.showErrorMessage(`Overleaf Comments: ${what} failed: ${e instanceof Error ? e.message : e}`);
+      return undefined;
+    }
+  }
+
+  async function replyOrCreate(r: vscode.CommentReply) {
+    const text = r.text.trim();
+    if (!text) return;
+    const known = threads.find(t => t.thread === r.thread);
+    if (known) {
+      // Optimistic: show the reply now; refresh() replaces it with the server's copy.
+      r.thread.comments = [...r.thread.comments, { author: { name: 'You' }, body: new vscode.MarkdownString(text), mode: vscode.CommentMode.Preview }];
+      await write('Reply', (c, id) => c.postCommentMessage(id, known.comment.threadId, text));
+      return;
+    }
+    // New thread from the UI: anchor it to the selected text.
+    const doc = await vscode.workspace.openTextDocument(r.thread.uri);
+    const selected = doc.getText(r.thread.range);
+    const start = doc.offsetAt(r.thread.range.start);
+    const occurrence = occurrenceAt(doc.getText(), start, selected);
+    r.thread.dispose();
+    if (!selected.trim() || occurrence === undefined) {
+      void vscode.window.showErrorMessage('Overleaf Comments: select the text to comment on first (a non-empty selection that does not overlap an identical earlier match).');
+      return;
+    }
+    const filePath = vscode.workspace.asRelativePath(doc.uri, false);
+    const added = await write('Add comment', (c, id) => c.addComment(id, { filePath, content: text, selectedText: selected, occurrence }));
+    const landed = added && ctx.workspaceState.get<ProjectComment[]>(CACHE_KEY)?.find(c => c.threadId === added.threadId);
+    if (added && landed && landed.selectedText !== selected) {
+      void vscode.window.showWarningMessage(`Overleaf Comments: the comment attached to different text than selected ("${landed.selectedText.slice(0, 40)}"). Your local file may differ from Overleaf's copy; git pull and check.`);
+    }
+  }
+
+  async function setResolved(thread: vscode.CommentThread, resolved: boolean) {
+    const known = threads.find(t => t.thread === thread);
+    if (!known) return;
+    await write(resolved ? 'Resolve' : 'Reopen', (c, id) => (resolved ? c.resolveComment(id, known.comment.threadId) : c.reopenComment(id, known.comment.threadId)));
+  }
+
   ctx.subscriptions.push(
     controller,
     output,
@@ -132,6 +195,9 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
         t.thread.label = a.found ? undefined : 'Anchor lost (text edited locally)';
       }
     }),
+    vscode.commands.registerCommand('overleafComments.reply', replyOrCreate),
+    vscode.commands.registerCommand('overleafComments.resolve', (t: vscode.CommentThread) => setResolved(t, true)),
+    vscode.commands.registerCommand('overleafComments.reopen', (t: vscode.CommentThread) => setResolved(t, false)),
     vscode.commands.registerCommand('overleafComments.refresh', () =>
       vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Overleaf comments' }, () => refresh())),
     vscode.commands.registerCommand('overleafComments.clearCookie', async () => {
@@ -159,6 +225,9 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   void refresh(false).then(() => refresh());
   return {
     render,
+    useClient: c => { injected = c; },
+    newThread: (uri, range) => controller.createCommentThread(uri, range, []),
+    thread: i => threads[i].thread,
     storeCookie: v => Promise.resolve(ctx.secrets.store(COOKIE_KEY, v)),
     status: () => statusItem.text,
     seedCacheAndRefresh: async (comments, fetch) => {
@@ -167,6 +236,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     },
     threads: () => threads.map(t => ({
       uri: t.thread.uri.toString(),
+      threadId: t.comment.threadId,
       line: t.thread.range.start.line,
       label: t.thread.label,
       resolved: t.thread.state === vscode.CommentThreadState.Resolved,

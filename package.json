@@ -27,6 +27,20 @@
       {
         "command": "overleafComments.clearCookie",
         "title": "Overleaf Comments: Clear Session Cookie"
+      },
+      {
+        "command": "overleafComments.reply",
+        "title": "Reply"
+      },
+      {
+        "command": "overleafComments.resolve",
+        "title": "Resolve thread",
+        "icon": "$(check)"
+      },
+      {
+        "command": "overleafComments.reopen",
+        "title": "Reopen thread",
+        "icon": "$(debug-restart)"
       }
     ],
     "configuration": {
@@ -54,13 +68,49 @@
           "description": "Re-fetch comments when the window regains focus and the last fetch is older than this many minutes. 0 = only on startup and manual refresh."
         }
       }
+    },
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "overleafComments.reply",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.resolve",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.reopen",
+          "when": "false"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "overleafComments.reply",
+          "group": "inline",
+          "when": "commentController == overleaf"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "overleafComments.resolve",
+          "group": "navigation",
+          "when": "commentController == overleaf && commentThread == open"
+        },
+        {
+          "command": "overleafComments.reopen",
+          "group": "navigation",
+          "when": "commentController == overleaf && commentThread == resolved"
+        }
+      ]
     }
   },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js --banner:js=\"const __importMetaUrl=require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
-    "test:host": "esbuild test/host/suite.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/host-suite.cjs && node test/host/run.ts"
+    "test:host": "esbuild test/host/suite.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/host-suite.cjs && node test/host/run.ts",
+    "test:live": "esbuild test/host/live.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/host-live.cjs --banner:js=\"const __importMetaUrl=require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl && node test/host/run.ts"
   },
   "dependencies": {
     "@aloth/olcli": "file:vendor/olcli"

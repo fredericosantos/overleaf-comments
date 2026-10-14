@@ -24,3 +24,19 @@ export function locate(text: string, position: number, selectedText: string): An
   if (best === -1) return { start: clamped, end: clamped, found: false };
   return { start: best, end: best + selectedText.length, found: true };
 }
+
+/**
+ * 1-based occurrence number of `selected` at offset `start`, counted the way olcli's addComment scans
+ * (non-overlapping, left to right), or undefined if `start` is not on that scan. Lets us ask olcli
+ * for exactly the occurrence the user selected, even when the phrase appears several times.
+ */
+export function occurrenceAt(text: string, start: number, selected: string): number | undefined {
+  if (!selected) return undefined;
+  let from = 0;
+  for (let n = 1; ; n++) {
+    const pos = text.indexOf(selected, from);
+    if (pos === -1 || pos > start) return undefined;
+    if (pos === start) return n;
+    from = pos + selected.length;
+  }
+}

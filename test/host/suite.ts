@@ -56,4 +56,37 @@ export async function run(): Promise<void> {
   await api.seedCacheAndRefresh([comment('f', 'Final', doc.getText().indexOf('Final'))], true);
   assert.equal(api.threads().filter(t => t.uri === uri.toString()).length, 1);
   assert.match(api.status(), /cached/);
+
+  // 7-9. write path with a fake client: reply, new comment (anchored by occurrence), resolve
+  await vscode.workspace.getConfiguration('overleafComments').update('projectId', '0123456789abcdef01234567', vscode.ConfigurationTarget.Global);
+  const calls: unknown[][] = [];
+  api.useClient({
+    listComments: async () => [],
+    addComment: async (id: string, o: unknown) => { calls.push(['add', id, o]); return { ...comment('T9', 'x', 0) }; },
+    postCommentMessage: async (id: string, t: string, c: string) => { calls.push(['reply', id, t, c]); return null; },
+    resolveComment: async (id: string, t: string) => { calls.push(['resolve', id, t]); return comment(t, 'x', 0); },
+    reopenComment: async (id: string, t: string) => { calls.push(['reopen', id, t]); return comment(t, 'x', 0); },
+  } as never);
+  const seed = () => api.render(root, [{ ...comment('T1', 'gamma delta', doc.getText().indexOf('gamma delta')) }]);
+
+  await seed();
+  await vscode.commands.executeCommand('overleafComments.reply', { thread: api.thread(0), text: '  hello  ' });
+  assert.deepEqual(calls.pop(), ['reply', '0123456789abcdef01234567', 'T1', 'hello']);
+
+  await seed();
+  await vscode.commands.executeCommand('overleafComments.resolve', api.thread(0));
+  assert.deepEqual(calls.pop(), ['resolve', '0123456789abcdef01234567', 'T1']);
+  await seed();
+  await vscode.commands.executeCommand('overleafComments.reopen', api.thread(0));
+  assert.deepEqual(calls.pop(), ['reopen', '0123456789abcdef01234567', 'T1']);
+
+  const g = doc.getText().indexOf('gamma delta');
+  const fresh = api.newThread(uri, new vscode.Range(doc.positionAt(g), doc.positionAt(g + 'gamma delta'.length)));
+  await vscode.commands.executeCommand('overleafComments.reply', { thread: fresh, text: 'note' });
+  assert.deepEqual(calls.pop(), ['add', '0123456789abcdef01234567', { filePath: 'chap/f10.tex', content: 'note', selectedText: 'gamma delta', occurrence: 1 }]);
+
+  // empty selection: refused, nothing sent
+  const empty = api.newThread(uri, new vscode.Range(doc.positionAt(g), doc.positionAt(g)));
+  await vscode.commands.executeCommand('overleafComments.reply', { thread: empty, text: 'nope' });
+  assert.equal(calls.length, 0);
 }
