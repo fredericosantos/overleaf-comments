@@ -71,6 +71,8 @@ export async function run(): Promise<void> {
 
   await seed();
   assert.deepEqual(api.tree(), [{ file: 'chap/f10.tex', threads: ['c1'] }]); // sidebar tree mirrors the thread
+  const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri);
+  assert.deepEqual(lenses.map(l => l.command?.title), ['💬 2 comments', 'Reply', 'Resolve']); // clickable line above the comment
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.thread(0), text: '  hello  ' });
   assert.deepEqual(calls.pop(), ['reply', '0123456789abcdef01234567', 'T1', 'hello']);
 
@@ -96,4 +98,14 @@ export async function run(): Promise<void> {
   const nothing = api.newThread(uri, new vscode.Range(doc.positionAt(blank), doc.positionAt(blank)));
   await vscode.commands.executeCommand('overleafComments.reply', { thread: nothing, text: 'nope' });
   assert.equal(calls.length, 0);
+
+  // blank line in the middle of the file: anchored to its line break
+  const ins = new vscode.WorkspaceEdit();
+  ins.insert(uri, new vscode.Position(1, 0), '\n');
+  await vscode.workspace.applyEdit(ins);
+  const nl = doc.offsetAt(new vscode.Position(1, 0));
+  assert.equal(doc.lineAt(1).text, '');
+  const blankMid = api.newThread(uri, new vscode.Range(1, 0, 1, 0));
+  await vscode.commands.executeCommand('overleafComments.reply', { thread: blankMid, text: 'on a blank line' });
+  assert.deepEqual(calls.pop(), ['add', '0123456789abcdef01234567', { filePath: 'chap/f10.tex', content: 'on a blank line', selectedText: '\n', occurrence: doc.getText().slice(0, nl).split('\n').length }]);
 }

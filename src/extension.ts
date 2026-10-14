@@ -4,12 +4,23 @@ import { promisify } from 'node:util';
 import { OverleafClient, type ProjectComment, type CommentMessage } from '@aloth/olcli';
 import { locate, occurrenceAt } from './anchor.ts';
 import { projectIdFromRemote } from './project.ts';
-import { showIconLocations } from './locations-demo.ts';
+import { Markers, ALL_MARKERS, type Marker } from './markers.ts';
 
 const COOKIE_KEY = 'overleafComments.cookie';
 const CACHE_KEY = 'overleafComments.cache';
 const CACHE_AT_KEY = 'overleafComments.cacheAt';
 const run = promisify(execFile);
+
+const MARKER_HELP: Record<Marker, string> = {
+  glyphMargin: 'icon left of the line numbers (orange open, green resolved)',
+  inlineBefore: '💬 at the start of the commented text',
+  inlineAfter: '💬 N at the end of the line',
+  lineTint: 'tinted background on the line',
+  border: 'dotted box around the commented text',
+  overviewRuler: 'mark in the scrollbar strip at the far right',
+  codeLens: 'clickable line above: count, Reply, Resolve',
+  hover: 'thread text when hovering the commented text',
+};
 
 /** User-fixable setup problems (no cookie / no remote): reported, but not counted as a fetch attempt. */
 class SetupError extends Error {}
@@ -116,6 +127,9 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }
   }
 
+  const markers = new Markers(ctx.extensionUri, () => threads, () => cfg().get<Marker[]>('markers') ?? [...ALL_MARKERS]);
+  ctx.subscriptions.push(markers);
+
   let renderGen = 0;
   async function render(root: vscode.Uri, comments: ProjectComment[]) {
     const gen = ++renderGen;
@@ -148,6 +162,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }
     treeChanged.fire();
     for (const e of vscode.window.visibleTextEditors) poke(e.document.uri);
+    markers.apply();
   }
 
   let lastFetch = 0;
@@ -218,8 +233,16 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     let start = doc.offsetAt(r.thread.range.start);
     if (!selected.trim()) {
       const l = doc.lineAt(r.thread.range.start.line);
-      selected = l.text.trim();
-      start = doc.offsetAt(l.range.start) + l.firstNonWhitespaceCharacterIndex;
+      if (l.text.trim()) {
+        selected = l.text.trim();
+        start = doc.offsetAt(l.range.start) + l.firstNonWhitespaceCharacterIndex;
+      } else if (doc.getText().charAt(doc.offsetAt(l.range.end)) === '\n') {
+        // Blank line: anchor to its line break (Overleaf wants a non-empty range).
+        selected = '\n';
+        start = doc.offsetAt(l.range.end);
+      } else {
+        selected = '';
+      }
     }
     const occurrence = occurrenceAt(doc.getText(), start, selected);
     r.thread.dispose();
@@ -236,6 +259,17 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }
   }
 
+  const byId = (id: string) => threads.find(t => t.comment.threadId === id);
+  async function revealEntry(e: (typeof threads)[number]) {
+    const editor = await vscode.window.showTextDocument(e.thread.uri, { selection: e.thread.range });
+    editor.revealRange(e.thread.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+    e.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+  }
+  async function promptReply(e: (typeof threads)[number]) {
+    const text = await vscode.window.showInputBox({ prompt: 'Reply to this Overleaf thread', ignoreFocusOut: true });
+    if (text) await replyOrCreate({ thread: e.thread, text } as vscode.CommentReply);
+  }
+
   async function setResolved(thread: vscode.CommentThread, resolved: boolean) {
     const known = threads.find(t => t.thread === thread);
     if (!known) return;
@@ -249,7 +283,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     output,
     statusItem,
     vscode.window.onDidChangeActiveTextEditor(e => e && poke(e.document.uri)),
-    vscode.window.onDidChangeVisibleTextEditors(es => es.forEach(e => poke(e.document.uri))),
+    vscode.window.onDidChangeVisibleTextEditors(es => { es.forEach(e => poke(e.document.uri)); markers.apply(); }),
     vscode.window.onDidChangeWindowState(w => {
       const mins = cfg().get<number>('refreshMinutes') ?? 0;
       if (w.focused && mins > 0 && lastFetch && Date.now() - lastFetch > mins * 60_000) void refresh();
@@ -268,21 +302,19 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     vscode.commands.registerCommand('overleafComments.reply', replyOrCreate),
     vscode.commands.registerCommand('overleafComments.resolve', (t: vscode.CommentThread) => setResolved(t, true)),
     vscode.commands.registerCommand('overleafComments.reopen', (t: vscode.CommentThread) => setResolved(t, false)),
-    vscode.commands.registerCommand('overleafComments.treeReveal', async (n: Node) => {
-      const e = threadOf(n);
-      if (!e) return;
-      const editor = await vscode.window.showTextDocument(e.thread.uri, { selection: e.thread.range, preserveFocus: false });
-      editor.revealRange(e.thread.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-      e.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-    }),
-    vscode.commands.registerCommand('overleafComments.treeReply', async (n: Node) => {
-      const e = threadOf(n);
-      const text = e && (await vscode.window.showInputBox({ prompt: 'Reply to this Overleaf thread', ignoreFocusOut: true }));
-      if (e && text) await replyOrCreate({ thread: e.thread, text } as vscode.CommentReply);
-    }),
+    vscode.commands.registerCommand('overleafComments.treeReveal', (n: Node) => { const e = threadOf(n); return e && revealEntry(e); }),
+    vscode.commands.registerCommand('overleafComments.treeReply', (n: Node) => { const e = threadOf(n); return e && promptReply(e); }),
     vscode.commands.registerCommand('overleafComments.treeResolve', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, true); }),
     vscode.commands.registerCommand('overleafComments.treeReopen', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, false); }),
-    vscode.commands.registerCommand('overleafComments.showIconLocations', () => showIconLocations(ctx, controller)),
+    vscode.commands.registerCommand('overleafComments.lensShow', (id: string) => { const e = byId(id); return e && revealEntry(e); }),
+    vscode.commands.registerCommand('overleafComments.lensReply', (id: string) => { const e = byId(id); return e && promptReply(e); }),
+    vscode.commands.registerCommand('overleafComments.lensResolve', (id: string) => { const e = byId(id); return e && setResolved(e.thread, true); }),
+    vscode.commands.registerCommand('overleafComments.lensReopen', (id: string) => { const e = byId(id); return e && setResolved(e.thread, false); }),
+    vscode.commands.registerCommand('overleafComments.chooseMarkers', async () => {
+      const current = new Set(cfg().get<Marker[]>('markers') ?? ALL_MARKERS);
+      const picked = await vscode.window.showQuickPick(ALL_MARKERS.map(m => ({ label: m, picked: current.has(m), description: MARKER_HELP[m] })), { canPickMany: true, title: 'Overleaf comment markers (the native icon is always shown)' });
+      if (picked) await cfg().update('markers', picked.map(p => p.label), vscode.ConfigurationTarget.Global);
+    }),
     vscode.commands.registerCommand('overleafComments.refresh', () =>
       vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Overleaf comments' }, () => refresh())),
     vscode.commands.registerCommand('overleafComments.clearCookie', async () => {

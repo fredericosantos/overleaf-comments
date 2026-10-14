@@ -9,9 +9,10 @@ Comments are cached in VS Code workspace storage (outside the repo), never commi
 ## What you can do
 
 - **Read:** threads show in the gutter, the Comments panel, and an **Overleaf Comments** view in the activity bar (files, threads, replies; click to jump). Drag that view to the secondary side bar to keep it on the right, as in Overleaf.
+- **Markers:** besides VS Code's native comment icon (fixed spot, right of the line numbers) the extension can draw its own: an icon left of the line numbers, 💬 before/after the text, a line tint, a dotted border, a scrollbar mark, a CodeLens line above (count, Reply, Resolve) and a hover. All are on by default; run **Overleaf Comments: Choose Markers** (or edit `overleafComments.markers`) to keep the ones you like.
 - **Reply:** type in the thread's reply box, or use the reply button in the sidebar.
 - **Resolve / reopen:** the check button on a thread (reopen needs `showResolved`).
-- **New comment:** select text, click the `+` in the gutter, type. The selected text must be non-empty; the extension asks Overleaf to anchor to that exact occurrence and warns if Overleaf attached it to different text (for example when your local file differs from Overleaf's copy; `git pull` first).
+- **New comment:** select text, click the `+` in the gutter, type. With nothing selected it anchors to the clicked line's text, and a blank line is anchored to its line break. the extension asks Overleaf to anchor to that exact occurrence and warns if Overleaf attached it to different text (for example when your local file differs from Overleaf's copy; `git pull` first).
 
 Comment widgets always open below their line; VS Code has no setting for placing them above.
 
