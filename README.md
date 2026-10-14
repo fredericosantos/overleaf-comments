@@ -10,7 +10,7 @@ Comments are cached in VS Code workspace storage (outside the repo), never commi
 
 - **Read:** threads show in the gutter, the Comments panel, and an **Overleaf Comments** view in the activity bar (files, threads, replies; click to jump). Drag that view to the secondary side bar to keep it on the right, as in Overleaf.
 - **Markers:** the commented text is faintly highlighted (orange open, green resolved) and hovering it shows the thread. The comment icon is VS Code's native one: on the last line of a multi-line comment, where the thread opens.
-- **Click to open:** clicking a commented line's gutter, or clicking inside the highlighted text, opens its thread (setting `overleafComments.openOnClick`). The thread always opens below the range's last line.
+- **Hover:** hovering the highlighted text shows the thread (long threads are clipped: first 2 and latest 3 messages, 400 characters each) with **Reply** and **Resolve**/**Reopen** links. Threads open only from VS Code's comment icon or the side panel, never by clicking the text.
 - **Buttons:** each thread has Reply (the reply box), Resolve/Reopen and Close (collapse) in its header.
 - **Reply:** type in the thread's reply box, or use the reply button in the sidebar.
 - **Resolve / reopen:** the check button on a thread (reopen needs `showResolved`).

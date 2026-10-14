@@ -5,6 +5,7 @@ import { OverleafClient, type ProjectComment, type CommentMessage } from '@aloth
 import { locate, occurrenceAt } from './anchor.ts';
 import { projectIdFromRemote } from './project.ts';
 import { Highlights } from './markers.ts';
+import { authorOf as author } from './hover.ts';
 
 const COOKIE_KEY = 'overleafComments.cookie';
 const CACHE_KEY = 'overleafComments.cache';
@@ -19,6 +20,7 @@ class Cancelled extends Error {}
 export interface Prompts {
   confirmPush(message: string, okLabel: string): Thenable<boolean>;
   commitMessage(defaultMessage: string): Thenable<string | undefined>;
+  replyText(): Thenable<string | undefined>;
 }
 
 export interface ExtensionApi {
@@ -35,8 +37,6 @@ export interface ExtensionApi {
   /** Test seam: create a thread the way the UI's "+" does (not yet known to Overleaf). */
   newThread(uri: vscode.Uri, range: vscode.Range): vscode.CommentThread;
   thread(i: number): vscode.CommentThread;
-  /** Test seam: simulate a click (collapsed cursor or whole-line selection) and report whether a thread opened. */
-  click(uri: vscode.Uri, sel: vscode.Selection): Promise<boolean>;
   /** Test seam: what the sidebar tree shows (file -> thread titles). */
   tree(): { file: string; threads: string[] }[];
   status(): string;
@@ -203,6 +203,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   let prompts: Prompts = {
     confirmPush: (m, ok) => vscode.window.showWarningMessage(m, { modal: true }, ok).then(r => r === ok),
     commitMessage: d => vscode.window.showInputBox({ prompt: 'Commit message', value: d, ignoreFocusOut: true }),
+    replyText: () => vscode.window.showInputBox({ prompt: 'Reply to this Overleaf thread', ignoreFocusOut: true }),
   };
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
   const notThere = (e: unknown) => /Selected text not found/.test(String(e));
@@ -296,26 +297,15 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }
   }
 
+  const byId = (id: string) => threads.find(t => t.comment.threadId === id);
   async function revealEntry(e: (typeof threads)[number]) {
     const editor = await vscode.window.showTextDocument(e.thread.uri, { selection: e.thread.range });
     editor.revealRange(e.thread.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     e.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
   }
   async function promptReply(e: (typeof threads)[number]) {
-    const text = await vscode.window.showInputBox({ prompt: 'Reply to this Overleaf thread', ignoreFocusOut: true });
+    const text = await prompts.replyText();
     if (text) await replyOrCreate({ thread: e.thread, text } as vscode.CommentReply);
-  }
-
-  /** Clicking a commented line's gutter or text opens its thread (the widget itself appears below the range's last line). */
-  function openForClick(uri: vscode.Uri, doc: vscode.TextDocument, sel: vscode.Selection): boolean {
-    const wholeLines = !sel.isEmpty && sel.start.character === 0 && (sel.end.character === 0 || sel.end.character === doc.lineAt(sel.end.line).range.end.character);
-    if (!sel.isEmpty && !wholeLines) return false; // a dragged text selection is for editing / new comments
-    const hit = threads.find(t => t.thread.uri.toString() === uri.toString() && (sel.isEmpty
-      ? t.thread.range.contains(sel.start)
-      : t.thread.range.start.line <= sel.end.line - (sel.end.character === 0 ? 1 : 0) && t.thread.range.end.line >= sel.start.line));
-    if (!hit || hit.thread.collapsibleState === vscode.CommentThreadCollapsibleState.Expanded) return false;
-    hit.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-    return true;
   }
 
   async function setResolved(thread: vscode.CommentThread, resolved: boolean) {
@@ -330,9 +320,6 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     treeChanged,
     output,
     statusItem,
-    vscode.window.onDidChangeTextEditorSelection(e => {
-      if (e.kind === vscode.TextEditorSelectionChangeKind.Mouse && cfg().get<boolean>('openOnClick') !== false) openForClick(e.textEditor.document.uri, e.textEditor.document, e.selections[0]);
-    }),
     vscode.window.onDidChangeActiveTextEditor(e => e && poke(e.document.uri)),
     vscode.window.onDidChangeVisibleTextEditors(es => { es.forEach(e => poke(e.document.uri)); highlights.apply(); }),
     vscode.window.onDidChangeWindowState(w => {
@@ -358,6 +345,9 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     vscode.commands.registerCommand('overleafComments.treeResolve', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, true); }),
     vscode.commands.registerCommand('overleafComments.treeReopen', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, false); }),
     vscode.commands.registerCommand('overleafComments.close', (t: vscode.CommentThread) => { t.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed; }),
+    vscode.commands.registerCommand('overleafComments.hoverReply', (id: string) => { const e = byId(id); return e && promptReply(e); }),
+    vscode.commands.registerCommand('overleafComments.hoverResolve', (id: string) => { const e = byId(id); return e && setResolved(e.thread, true); }),
+    vscode.commands.registerCommand('overleafComments.hoverReopen', (id: string) => { const e = byId(id); return e && setResolved(e.thread, false); }),
     vscode.commands.registerCommand('overleafComments.refresh', () =>
       vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Overleaf comments' }, () => refresh())),
     vscode.commands.registerCommand('overleafComments.clearCookie', async () => {
@@ -386,7 +376,6 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   void refresh(false).then(() => refresh());
   return {
     render,
-    click: async (uri, sel) => openForClick(uri, await vscode.workspace.openTextDocument(uri), sel),
     setPrompts: p => { prompts = p; },
     useClient: c => { injected = c; },
     newThread: (uri, range) => controller.createCommentThread(uri, range, []),
@@ -407,11 +396,6 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       messages: t.thread.comments.length,
     })),
   };
-}
-
-function author(m: CommentMessage): string {
-  const u = m.user;
-  return u?.name ?? ([u?.first_name, u?.last_name].filter(Boolean).join(' ') || u?.email || 'unknown');
 }
 
 function toComment(m: CommentMessage, found: boolean): vscode.Comment {

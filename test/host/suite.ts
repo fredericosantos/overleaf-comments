@@ -72,34 +72,6 @@ export async function run(): Promise<void> {
 
   await seed();
   assert.deepEqual(api.tree(), [{ file: 'chap/f10.tex', threads: ['c1'] }]); // sidebar tree mirrors the thread
-  {
-    // click opens the thread: inside the range, or on its gutter (whole line); a dragged partial selection does not
-    const th = api.thread(0);
-    const r0 = th.range;
-    const inside = new vscode.Position(r0.start.line, r0.start.character + 2);
-    th.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
-    assert.equal(await api.click(uri, new vscode.Selection(inside, new vscode.Position(inside.line, inside.character + 3))), false);
-    assert.equal(await api.click(uri, new vscode.Selection(inside, inside)), true);
-    assert.equal(th.collapsibleState, vscode.CommentThreadCollapsibleState.Expanded);
-    th.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
-    assert.equal(await api.click(uri, new vscode.Selection(r0.start.line, 0, r0.start.line + 1, 0)), true);
-    th.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
-    assert.equal(await api.click(uri, new vscode.Selection(0, 0, 0, 0)), false);
-  }
-  {
-    // click opens the thread: inside the range, or on its gutter (whole line); a dragged partial selection does not
-    const th = api.thread(0);
-    const r0 = th.range;
-    const inside = new vscode.Position(r0.start.line, r0.start.character + 2);
-    th.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
-    assert.equal(await api.click(uri, new vscode.Selection(inside, new vscode.Position(inside.line, inside.character + 3))), false);
-    assert.equal(await api.click(uri, new vscode.Selection(inside, inside)), true);
-    assert.equal(th.collapsibleState, vscode.CommentThreadCollapsibleState.Expanded);
-    th.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
-    assert.equal(await api.click(uri, new vscode.Selection(r0.start.line, 0, r0.start.line + 1, 0)), true);
-    th.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
-    assert.equal(await api.click(uri, new vscode.Selection(0, 0, 0, 0)), false);
-  }
   const lensTitles = async () => (await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri)).map(l => l.command?.title);
   assert.deepEqual(await lensTitles(), []); // no CodeLens line above comments
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.thread(0), text: '  hello  ' });
@@ -110,6 +82,18 @@ export async function run(): Promise<void> {
   assert.deepEqual(calls.pop(), ['resolve', '0123456789abcdef01234567', 'T1']);
   await seed();
   await vscode.commands.executeCommand('overleafComments.reopen', api.thread(0));
+  assert.deepEqual(calls.pop(), ['reopen', '0123456789abcdef01234567', 'T1']);
+
+  // hover links run the same actions by thread id
+  api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d, replyText: async () => 'from hover' });
+  await seed();
+  await vscode.commands.executeCommand('overleafComments.hoverReply', 'T1');
+  assert.deepEqual(calls.pop(), ['reply', '0123456789abcdef01234567', 'T1', 'from hover']);
+  await seed();
+  await vscode.commands.executeCommand('overleafComments.hoverResolve', 'T1');
+  assert.deepEqual(calls.pop(), ['resolve', '0123456789abcdef01234567', 'T1']);
+  await seed();
+  await vscode.commands.executeCommand('overleafComments.hoverReopen', 'T1');
   assert.deepEqual(calls.pop(), ['reopen', '0123456789abcdef01234567', 'T1']);
 
   const g = doc.getText().indexOf('gamma delta');
@@ -158,12 +142,12 @@ export async function run(): Promise<void> {
   const at2 = doc.getText().indexOf('brand new local text');
   const rng = () => new vscode.Range(doc.positionAt(at2), doc.positionAt(at2 + 'brand new local text'.length));
 
-  api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d });
+  api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d, replyText: async () => undefined });
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.newThread(uri, rng()), text: 'declined' });
   assert.equal(calls.length, 0);
   assert.throws(() => bare('log', '--oneline'), 'nothing may be pushed when the user declines');
 
-  api.setPrompts({ confirmPush: async () => true, commitMessage: async d => `${d} (test)` });
+  api.setPrompts({ confirmPush: async () => true, commitMessage: async d => `${d} (test)`, replyText: async () => undefined });
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.newThread(uri, rng()), text: 'accepted' });
   assert.equal(calls.length, 1, 'comment added after the push');
   assert.match(git('log', '--format=%s', '-1'), /^Update chap\/f10\.tex \(test\)$/);

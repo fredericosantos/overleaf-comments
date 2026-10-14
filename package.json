@@ -66,6 +66,18 @@
         "command": "overleafComments.close",
         "title": "Close",
         "icon": "$(close)"
+      },
+      {
+        "command": "overleafComments.hoverReply",
+        "title": "Overleaf Comments: hoverReply"
+      },
+      {
+        "command": "overleafComments.hoverResolve",
+        "title": "Overleaf Comments: hoverResolve"
+      },
+      {
+        "command": "overleafComments.hoverReopen",
+        "title": "Overleaf Comments: hoverReopen"
       }
     ],
     "configuration": {
@@ -91,11 +103,6 @@
           "default": 5,
           "minimum": 0,
           "description": "Re-fetch comments when the window regains focus and the last fetch is older than this many minutes. 0 = only on startup and manual refresh."
-        },
-        "overleafComments.openOnClick": {
-          "type": "boolean",
-          "default": true,
-          "description": "Clicking a commented line's gutter or text opens its thread (a dragged text selection does not)."
         }
       }
     },
@@ -131,6 +138,18 @@
         },
         {
           "command": "overleafComments.close",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.hoverReply",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.hoverResolve",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.hoverReopen",
           "when": "false"
         }
       ],
