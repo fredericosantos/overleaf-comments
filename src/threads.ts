@@ -106,7 +106,11 @@ export class Threads implements vscode.Disposable {
       thread.label = found ? undefined : ANCHOR_LOST;
       next.push({ thread, comment: c, start, end });
       const waiting = this.lingering.get(c.threadId);
-      if (waiting) { waiting.dispose(); this.lingering.delete(c.threadId); }
+      if (waiting) {
+        thread.collapsibleState = waiting.collapsibleState; // the placeholder was open; so is the thread that replaces it
+        waiting.dispose();
+        this.lingering.delete(c.threadId);
+      }
     }
     old.forEach(e => e.thread.dispose());
     this.entries = next;
@@ -120,6 +124,10 @@ export class Threads implements vscode.Disposable {
     ++this.renderGen;
     this.entries.forEach(e => e.thread.dispose());
     this.entries = [];
+    this.lingering.forEach(temp => temp.dispose());
+    this.lingering.clear();
+    this.pendingReplies.clear();
+    this.warnedMissing = '';
     this.highlights.apply();
     this.onChange();
   }

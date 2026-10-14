@@ -55,8 +55,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     vscode.window.onDidChangeActiveTextEditor(e => e && threads.redraw(e.document.uri)),
     vscode.window.onDidChangeVisibleTextEditors(es => { es.forEach(e => threads.redraw(e.document.uri)); threads.highlights.apply(); }),
     vscode.window.onDidChangeWindowState(w => {
-      const mins = cfg().get<number>('refreshMinutes', 5);
-      if (w.focused && mins > 0 && sync.lastFetch && Date.now() - sync.lastFetch > mins * 60_000) void sync.refresh({ quiet: true });
+      const mins = cfg().get<number>('refreshMinutes'); // default (5) comes from package.json
+      if (w.focused && mins && mins > 0 && sync.lastFetch && Date.now() - sync.lastFetch > mins * 60_000) void sync.refresh({ quiet: true });
     }),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('overleafComments.baseUrl') || e.affectsConfiguration('overleafComments.projectId')) {

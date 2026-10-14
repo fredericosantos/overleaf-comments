@@ -189,7 +189,8 @@ export class Writes implements vscode.Disposable {
     const { model, threads } = this;
     if (!model.view(Date.now()).some(c => c.threadId === threadId && c.resolved !== resolved)) return;
     model.setIntent(threadId, resolved, Date.now());
-    const timer = setTimeout(() => { this.timers.delete(timer); void threads.render(); }, INTENT_TTL_MS + RERENDER_SLACK_MS); // let an expired intent take effect
+    // When the intent expires the UI falls back to what the server last said, which may be stale: refetch so it is not.
+    const timer = setTimeout(() => { this.timers.delete(timer); void this.sync.refresh({ quiet: true, useCache: false }); }, INTENT_TTL_MS + RERENDER_SLACK_MS);
     this.timers.add(timer);
     await threads.render();
     const res = await this.enqueue(threadId, () => this.write(resolved ? 'Resolve' : 'Reopen', (c, id) => (resolved ? c.resolveComment(id, threadId) : c.reopenComment(id, threadId))));
