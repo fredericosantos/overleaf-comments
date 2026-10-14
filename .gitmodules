@@ -1,0 +1,3 @@
+[submodule "vendor/olcli"]
+	path = vendor/olcli
+	url = https://github.com/fredericosantos/olcli.git
