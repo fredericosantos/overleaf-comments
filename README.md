@@ -25,6 +25,8 @@ Comment widgets always open below their line; VS Code has no setting for placing
 Settings: `overleafComments.projectId` (override git-remote detection), `overleafComments.baseUrl`
 (self-hosted), `overleafComments.showResolved`, `overleafComments.refreshMinutes` (re-fetch on window focus when older than N minutes; default 5, 0 = off).
 
+For scripted or throwaway launches you can instead start VS Code with `OVERLEAF_SESSION_COOKIE` set in its environment; the stored cookie takes precedence.
+
 If you see "No session cookie", this VS Code profile has no cookie yet: run **Overleaf Comments: Set Session Cookie** once (the cookie is stored per VS Code profile).
 
 Anchors are matched by the commented text, nearest to Overleaf's offset; if you edited that text
@@ -40,6 +42,7 @@ Install a built package with `code --install-extension overleaf-comments.vsix`
 git clone --recurse-submodules https://github.com/fredericosantos/overleaf-comments
 cd overleaf-comments/vendor/olcli && npm ci && npm run build && cd ../..
 npm install && npm test && npm run build
+npm run dev          # throwaway VS Code on a scratch Overleaf project (needs olcli logged in)
 npm run test:host   # drives an isolated VS Code (set VSCODE_EXECUTABLE if not in /Applications)
 code --extensionDevelopmentPath=$PWD <your-overleaf-clone>
 ```

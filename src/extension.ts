@@ -55,7 +55,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   async function getClient() {
     if (injected) return injected;
     if (client) return client;
-    const cookie = await ctx.secrets.get(COOKIE_KEY);
+    // The stored cookie wins; OVERLEAF_SESSION_COOKIE (like olcli's OVERLEAF_EMAIL/PASSWORD) is for headless/dev launches.
+    const cookie = (await ctx.secrets.get(COOKIE_KEY)) || process.env.OVERLEAF_SESSION_COOKIE;
     if (!cookie) throw new SetupError('No session cookie. Run "Overleaf Comments: Set Session Cookie".');
     client = await OverleafClient.fromSessionCookie(cookie, cfg().get<string>('baseUrl'));
     return client;

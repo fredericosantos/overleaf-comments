@@ -4,3 +4,5 @@ node_modules/
 dist/
 *.vsix
 .claude/scheduled_tasks.lock
+.test-ws/
+.test-profile/
