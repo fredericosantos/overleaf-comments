@@ -7,3 +7,4 @@ dist/
 .test-ws/
 .test-profile/
 media/icon-options/
+.DS_Store
