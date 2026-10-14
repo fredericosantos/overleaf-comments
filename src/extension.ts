@@ -53,6 +53,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       }
     }));
     if (gen !== renderGen) return;
+    const skipped = docs.filter(d => !d).length;
+    if (skipped) void vscode.window.showWarningMessage(`Overleaf Comments: ${skipped} comment thread(s) hidden because their file is not in this workspace (git pull?).`);
     threads.forEach(t => t.thread.dispose());
     threads = [];
     for (const d of docs) {
