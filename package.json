@@ -3,7 +3,7 @@
   "displayName": "Overleaf Comments",
   "description": "Read, reply to and resolve Overleaf review comments inside VS Code, for projects you sync with Overleaf's git bridge. Not affiliated with Overleaf.",
   "version": "0.1.0",
-  "publisher": "fredericosantos",
+  "publisher": "fsx",
   "license": "MIT",
   "repository": {
     "type": "git",

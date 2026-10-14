@@ -10,7 +10,7 @@ export async function run(): Promise<void> {
   assert.ok(id && cookie, 'OLC_PROJECT_ID and OLC_COOKIE are required');
   const real = await OverleafClient.fromSessionCookie(cookie);
   const root = vscode.workspace.workspaceFolders![0].uri;
-  const ext = vscode.extensions.getExtension<ExtensionApi>('fredericosantos.overleaf-comments')!;
+  const ext = vscode.extensions.getExtension<ExtensionApi>('fsx.overleaf-comments')!;
   const api = await ext.activate();
   await vscode.workspace.getConfiguration('overleafComments').update('projectId', id, vscode.ConfigurationTarget.Global);
   await new Promise(r => setTimeout(r, 500)); // the extension reloads when this setting changes; let that finish

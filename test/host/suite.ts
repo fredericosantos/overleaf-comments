@@ -12,7 +12,7 @@ const comment = (id: string, selectedText: string, position: number, resolved = 
 
 export async function run(): Promise<void> {
   const root = vscode.workspace.workspaceFolders![0].uri;
-  const ext = vscode.extensions.getExtension<ExtensionApi>('fredericosantos.overleaf-comments')!;
+  const ext = vscode.extensions.getExtension<ExtensionApi>('fsx.overleaf-comments')!;
   const api = await ext.activate();
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
   // Settings first: changing them makes the extension reload, so let that finish before any step runs.
