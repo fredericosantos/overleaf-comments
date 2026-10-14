@@ -56,7 +56,7 @@ SOFTWARE.
 
 olcli (`@aloth/olcli`, <https://github.com/aloth/olcli>) and the packages it depends on are bundled into `dist/extension.js`.
 
-### adm-zip 0.5.18 — MIT
+### adm-zip 0.5.16 — MIT
 
 ```text
 MIT License
@@ -82,7 +82,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### ajv 8.20.0 — MIT
+### ajv 8.17.1 — MIT
 
 ```text
 The MIT License (MIT)
@@ -134,7 +134,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### atomically 2.1.1 — MIT
+### atomically 2.1.0 — MIT
 
 ```text
 The MIT License (MIT)
@@ -423,12 +423,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### fast-uri 3.1.8 — BSD-3-Clause
+### fast-uri 3.1.0 — BSD-3-Clause
 
 ```text
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
-Copyright (c) 2021-present The Fastify team <https://github.com/fastify/fastify#team>
+Copyright (c) 2021-present The Fastify team
 All rights reserved.
+
+The Fastify team members are listed at https://github.com/fastify/fastify#team.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -506,7 +508,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### ignore 7.0.12 — MIT
+### ignore 7.0.5 — MIT
 
 ```text
 Copyright (c) 2013 Kael Zhang <i@kael.me>, contributors
@@ -686,7 +688,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### semver 7.8.5 — ISC
+### semver 7.7.3 — ISC
 
 ```text
 The ISC License
@@ -758,7 +760,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### uint8array-extras 1.6.0 — MIT
+### uint8array-extras 1.5.0 — MIT
 
 ```text
 MIT License
@@ -772,7 +774,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### undici 7.30.0 — MIT
+### undici 7.20.0 — MIT
 
 ```text
 MIT License
