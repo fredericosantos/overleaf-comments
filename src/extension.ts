@@ -18,6 +18,8 @@ export interface ExtensionApi {
   render(root: vscode.Uri, comments: ProjectComment[]): Promise<void>;
   /** Test seam: put comments in the cache, then refresh (fetch=false renders the cache only). */
   seedCacheAndRefresh(comments: ProjectComment[], fetch: boolean): Promise<void>;
+  /** Test seam: store a cookie as the Set Session Cookie command would. */
+  storeCookie(value: string): Promise<void>;
   status(): string;
   threads(): { uri: string; line: number; label?: string; resolved: boolean; messages: number }[];
 }
@@ -157,6 +159,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   void refresh(false).then(() => refresh());
   return {
     render,
+    storeCookie: v => Promise.resolve(ctx.secrets.store(COOKIE_KEY, v)),
     status: () => statusItem.text,
     seedCacheAndRefresh: async (comments, fetch) => {
       await ctx.workspaceState.update(CACHE_KEY, comments);

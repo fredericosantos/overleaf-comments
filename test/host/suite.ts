@@ -49,4 +49,11 @@ export async function run(): Promise<void> {
   await api.seedCacheAndRefresh([comment('e', 'Final', doc.getText().indexOf('Final'))], true);
   assert.equal(api.threads().filter(t => t.uri === uri.toString()).length, 1);
   assert.match(api.status(), /cached/); // and the user is told it is stale
+
+  // 6. real network failure (cookie present, server unreachable): cached comments stay and are marked stale
+  await vscode.workspace.getConfiguration('overleafComments').update('baseUrl', 'http://127.0.0.1:9', vscode.ConfigurationTarget.Global);
+  await api.storeCookie('not-a-real-cookie');
+  await api.seedCacheAndRefresh([comment('f', 'Final', doc.getText().indexOf('Final'))], true);
+  assert.equal(api.threads().filter(t => t.uri === uri.toString()).length, 1);
+  assert.match(api.status(), /cached/);
 }
