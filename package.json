@@ -61,6 +61,10 @@
       {
         "command": "overleafComments.treeReveal",
         "title": "Show in editor"
+      },
+      {
+        "command": "overleafComments.showIconLocations",
+        "title": "Overleaf Comments (dev): Show icon locations in red"
       }
     ],
     "configuration": {

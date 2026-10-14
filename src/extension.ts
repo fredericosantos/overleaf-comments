@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { OverleafClient, type ProjectComment, type CommentMessage } from '@aloth/olcli';
 import { locate, occurrenceAt } from './anchor.ts';
 import { projectIdFromRemote } from './project.ts';
+import { showIconLocations } from './locations-demo.ts';
 
 const COOKIE_KEY = 'overleafComments.cookie';
 const CACHE_KEY = 'overleafComments.cache';
@@ -275,6 +276,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }),
     vscode.commands.registerCommand('overleafComments.treeResolve', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, true); }),
     vscode.commands.registerCommand('overleafComments.treeReopen', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, false); }),
+    vscode.commands.registerCommand('overleafComments.showIconLocations', () => showIconLocations(ctx, controller)),
     vscode.commands.registerCommand('overleafComments.refresh', () =>
       vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Overleaf comments' }, () => refresh())),
     vscode.commands.registerCommand('overleafComments.clearCookie', async () => {
