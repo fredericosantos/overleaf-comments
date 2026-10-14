@@ -14,7 +14,7 @@ Read-only. Comments are cached in VS Code workspace storage (outside the repo), 
 3. Comments appear in the gutter and the Comments panel. **Overleaf Comments: Refresh** re-fetches.
 
 Settings: `overleafComments.projectId` (override git-remote detection), `overleafComments.baseUrl`
-(self-hosted), `overleafComments.showResolved`.
+(self-hosted), `overleafComments.showResolved`, `overleafComments.refreshMinutes` (re-fetch on window focus when older than N minutes; default 5, 0 = off).
 
 Anchors are matched by the commented text, nearest to Overleaf's offset; if you edited that text
 locally the thread is labelled "anchor lost" at its approximate position.

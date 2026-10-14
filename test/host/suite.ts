@@ -44,4 +44,8 @@ export async function run(): Promise<void> {
   // 4. file that does not exist: skipped without throwing, others still render
   await api.render(root, [comment('c', 'x', 0), { ...comment('d', 'x', 0), path: 'nope/missing.tex' }]);
   assert.equal(api.threads().filter(t => t.uri.endsWith('missing.tex')).length, 0);
+
+  // 5. fetch fails (no cookie in the test profile): cached comments still render
+  await api.seedCacheAndRefresh([comment('e', 'Final', doc.getText().indexOf('Final'))], true);
+  assert.equal(api.threads().filter(t => t.uri === uri.toString()).length, 1);
 }

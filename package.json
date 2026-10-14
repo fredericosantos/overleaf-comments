@@ -46,6 +46,12 @@
           "type": "boolean",
           "default": false,
           "description": "Also show resolved threads."
+        },
+        "overleafComments.refreshMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "description": "Re-fetch comments when the window regains focus and the last fetch is older than this many minutes. 0 = only on startup and manual refresh."
         }
       }
     }

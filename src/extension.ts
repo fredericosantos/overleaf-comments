@@ -12,6 +12,8 @@ const run = promisify(execFile);
 export interface ExtensionApi {
   /** Test seam: render fixture comments without touching the network. */
   render(root: vscode.Uri, comments: ProjectComment[]): Promise<void>;
+  /** Test seam: put comments in the cache, then refresh (fetch=false renders the cache only). */
+  seedCacheAndRefresh(comments: ProjectComment[], fetch: boolean): Promise<void>;
   threads(): { uri: string; line: number; label?: string; resolved: boolean; messages: number }[];
 }
 
@@ -70,6 +72,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }
   }
 
+  let lastFetch = 0;
   async function refresh(fetch = true) {
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) return;
@@ -82,6 +85,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       const status = cfg().get<boolean>('showResolved') ? 'all' : 'open';
       const comments = await (await getClient()).listComments(id, { status });
       await ctx.workspaceState.update(CACHE_KEY, comments);
+      lastFetch = Date.now();
       await render(folder.uri, comments);
     } catch (e) {
       client = undefined; // cookie may have expired; rebuild next time
@@ -93,6 +97,10 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   ctx.subscriptions.push(
     controller,
     output,
+    vscode.window.onDidChangeWindowState(w => {
+      const mins = cfg().get<number>('refreshMinutes') ?? 0;
+      if (w.focused && mins > 0 && lastFetch && Date.now() - lastFetch > mins * 60_000) void refresh();
+    }),
     vscode.workspace.onDidChangeTextDocument(e => {
       const text = e.document.getText();
       for (const t of threads) {
@@ -127,6 +135,10 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   void refresh(false).then(() => refresh());
   return {
     render,
+    seedCacheAndRefresh: async (comments, fetch) => {
+      await ctx.workspaceState.update(CACHE_KEY, comments);
+      await refresh(fetch);
+    },
     threads: () => threads.map(t => ({
       uri: t.thread.uri.toString(),
       line: t.thread.range.start.line,
