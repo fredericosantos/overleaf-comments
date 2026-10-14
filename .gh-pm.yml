@@ -1,0 +1,97 @@
+project:
+    name: overleaf-comments
+    number: 18
+    owner: fredericosantos
+repositories:
+    - fredericosantos/overleaf-comments
+defaults:
+    priority: medium
+    status: backlog
+    labels:
+        - pm-tracked
+fields:
+    priority:
+        field: Priority
+        values:
+            critical: Critical
+            high: High
+            low: Low
+            medium: Medium
+    status:
+        field: Status
+        values:
+            backlog: Backlog
+            done: Done
+            in_progress: In Progress
+            review: Review
+            todo: Todo
+triage:
+    estimate:
+        query: is:issue is:open -has:estimate
+        apply: {}
+        interactive:
+            estimate: true
+    tracked:
+        query: is:issue is:open -label:pm-tracked
+        apply:
+            labels:
+                - pm-tracked
+            fields:
+                priority: p1
+                status: backlog
+        interactive:
+            status: true
+metadata:
+    project:
+        id: PVT_kwHOABEWL84BnAX-
+    fields:
+        - name: Title
+          id: PVTF_lAHOABEWL84BnAX-zhlm9k8
+          data_type: TITLE
+        - name: Assignees
+          id: PVTF_lAHOABEWL84BnAX-zhlm9lA
+          data_type: ASSIGNEES
+        - name: Status
+          id: PVTSSF_lAHOABEWL84BnAX-zhlm9lE
+          data_type: SINGLE_SELECT
+          options:
+            - name: Backlog
+              id: 5397a9e1
+            - name: Todo
+              id: 8097b8af
+            - name: In Progress
+              id: 5ffc8863
+            - name: Review
+              id: 65ada82f
+            - name: Done
+              id: "85275267"
+        - name: Labels
+          id: PVTF_lAHOABEWL84BnAX-zhlm9lM
+          data_type: LABELS
+        - name: Linked pull requests
+          id: PVTF_lAHOABEWL84BnAX-zhlm9lU
+          data_type: LINKED_PULL_REQUESTS
+        - name: Milestone
+          id: PVTF_lAHOABEWL84BnAX-zhlm9lc
+          data_type: MILESTONE
+        - name: Repository
+          id: PVTF_lAHOABEWL84BnAX-zhlm9lk
+          data_type: REPOSITORY
+        - name: Reviewers
+          id: PVTF_lAHOABEWL84BnAX-zhlm9l0
+          data_type: REVIEWERS
+        - name: Parent issue
+          id: PVTF_lAHOABEWL84BnAX-zhlm9l8
+          data_type: PARENT_ISSUE
+        - name: Sub-issues progress
+          id: PVTF_lAHOABEWL84BnAX-zhlm9mE
+          data_type: SUB_ISSUES_PROGRESS
+        - name: Created
+          id: PVTF_lAHOABEWL84BnAX-zhlm9mQ
+          data_type: CREATED
+        - name: Updated
+          id: PVTF_lAHOABEWL84BnAX-zhlm9mY
+          data_type: UPDATED
+        - name: Closed
+          id: PVTF_lAHOABEWL84BnAX-zhlm9mg
+          data_type: CLOSED
