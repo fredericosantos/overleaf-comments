@@ -117,6 +117,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       await ctx.secrets.delete(COOKIE_KEY);
       await ctx.workspaceState.update(CACHE_KEY, undefined);
       client = undefined;
+      lastFetch = 0; // focus-refresh only runs after a successful fetch
       threads.forEach(t => t.thread.dispose());
       threads = [];
     }),
