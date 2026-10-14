@@ -9,6 +9,9 @@ const COOKIE_KEY = 'overleafComments.cookie';
 const CACHE_KEY = 'overleafComments.cache';
 const run = promisify(execFile);
 
+/** User-fixable setup problems (no cookie / no remote): reported, but not counted as a fetch attempt. */
+class SetupError extends Error {}
+
 export interface ExtensionApi {
   /** Test seam: render fixture comments without touching the network. */
   render(root: vscode.Uri, comments: ProjectComment[]): Promise<void>;
@@ -36,7 +39,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   async function getClient(): Promise<OverleafClient> {
     if (client) return client;
     const cookie = await ctx.secrets.get(COOKIE_KEY);
-    if (!cookie) throw new Error('No session cookie. Run "Overleaf Comments: Set Session Cookie".');
+    if (!cookie) throw new SetupError('No session cookie. Run "Overleaf Comments: Set Session Cookie".');
     client = await OverleafClient.fromSessionCookie(cookie, cfg().get<string>('baseUrl'));
     return client;
   }
@@ -81,7 +84,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     if (!fetch) return;
     try {
       const id = await projectId(folder.uri.fsPath);
-      if (!id) throw new Error('No Overleaf git remote found; set overleafComments.projectId.');
+      if (!id) throw new SetupError('No Overleaf git remote found; set overleafComments.projectId.');
       const status = cfg().get<boolean>('showResolved') ? 'all' : 'open';
       const comments = await (await getClient()).listComments(id, { status });
       await ctx.workspaceState.update(CACHE_KEY, comments);
@@ -89,6 +92,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       await render(folder.uri, comments);
     } catch (e) {
       client = undefined; // cookie may have expired; rebuild next time
+      // Back off after real failures (e.g. Overleaf 429): the focus refresh waits refreshMinutes before retrying.
+      if (!(e instanceof SetupError)) lastFetch = Date.now();
       output.appendLine(String(e));
       void vscode.window.showErrorMessage(`Overleaf Comments: ${e instanceof Error ? e.message : e}`);
     }
