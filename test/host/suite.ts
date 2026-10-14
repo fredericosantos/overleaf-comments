@@ -86,10 +86,22 @@ export async function run(): Promise<void> {
     th.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
     assert.equal(await api.click(uri, new vscode.Selection(0, 0, 0, 0)), false);
   }
+  {
+    // click opens the thread: inside the range, or on its gutter (whole line); a dragged partial selection does not
+    const th = api.thread(0);
+    const r0 = th.range;
+    const inside = new vscode.Position(r0.start.line, r0.start.character + 2);
+    th.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
+    assert.equal(await api.click(uri, new vscode.Selection(inside, new vscode.Position(inside.line, inside.character + 3))), false);
+    assert.equal(await api.click(uri, new vscode.Selection(inside, inside)), true);
+    assert.equal(th.collapsibleState, vscode.CommentThreadCollapsibleState.Expanded);
+    th.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
+    assert.equal(await api.click(uri, new vscode.Selection(r0.start.line, 0, r0.start.line + 1, 0)), true);
+    th.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
+    assert.equal(await api.click(uri, new vscode.Selection(0, 0, 0, 0)), false);
+  }
   const lensTitles = async () => (await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri)).map(l => l.command?.title);
-  assert.deepEqual(await lensTitles(), []); // default markers: icon + highlight only, no CodeLens
-  await vscode.workspace.getConfiguration('overleafComments').update('markers', ['glyphMargin', 'highlight', 'codeLens'], vscode.ConfigurationTarget.Global);
-  assert.deepEqual(await lensTitles(), ['💬 2 comments', 'Reply', 'Resolve']); // opt-in: clickable line above the comment
+  assert.deepEqual(await lensTitles(), []); // no CodeLens line above comments
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.thread(0), text: '  hello  ' });
   assert.deepEqual(calls.pop(), ['reply', '0123456789abcdef01234567', 'T1', 'hello']);
 

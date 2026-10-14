@@ -63,26 +63,6 @@
         "title": "Show in editor"
       },
       {
-        "command": "overleafComments.chooseMarkers",
-        "title": "Overleaf Comments: Choose Markers"
-      },
-      {
-        "command": "overleafComments.lensShow",
-        "title": "Overleaf Comments: lensShow"
-      },
-      {
-        "command": "overleafComments.lensReply",
-        "title": "Overleaf Comments: lensReply"
-      },
-      {
-        "command": "overleafComments.lensResolve",
-        "title": "Overleaf Comments: lensResolve"
-      },
-      {
-        "command": "overleafComments.lensReopen",
-        "title": "Overleaf Comments: lensReopen"
-      },
-      {
         "command": "overleafComments.close",
         "title": "Close",
         "icon": "$(close)"
@@ -111,28 +91,6 @@
           "default": 5,
           "minimum": 0,
           "description": "Re-fetch comments when the window regains focus and the last fetch is older than this many minutes. 0 = only on startup and manual refresh."
-        },
-        "overleafComments.markers": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "glyphMargin",
-              "highlight",
-              "inlineBefore",
-              "inlineAfter",
-              "lineTint",
-              "border",
-              "overviewRuler",
-              "codeLens",
-              "hover"
-            ]
-          },
-          "default": [
-            "glyphMargin",
-            "highlight"
-          ],
-          "description": "Extra markers drawn for each Overleaf thread, on top of VS Code's native comment icon. Default: the standard icon left of the line numbers and a faint highlight of the commented text. 'Overleaf Comments: Choose Markers' toggles them."
         },
         "overleafComments.openOnClick": {
           "type": "boolean",
@@ -169,22 +127,6 @@
         },
         {
           "command": "overleafComments.treeReveal",
-          "when": "false"
-        },
-        {
-          "command": "overleafComments.lensShow",
-          "when": "false"
-        },
-        {
-          "command": "overleafComments.lensReply",
-          "when": "false"
-        },
-        {
-          "command": "overleafComments.lensResolve",
-          "when": "false"
-        },
-        {
-          "command": "overleafComments.lensReopen",
           "when": "false"
         },
         {
