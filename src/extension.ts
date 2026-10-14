@@ -105,6 +105,16 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   const treeView = vscode.window.createTreeView('overleafComments.threads', { treeDataProvider: treeProvider });
   const threadOf = (n: Node) => (n.kind === 'thread' ? n.entry : undefined);
 
+  /** VS Code can leave a thread's gutter marker undrawn in an editor that was already open when the thread was
+   * created, until the thread is touched. Re-assigning the range for a document's threads redraws them. */
+  function poke(uri?: vscode.Uri) {
+    for (const t of threads) {
+      if (uri && t.thread.uri.toString() !== uri.toString()) continue;
+      t.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
+      t.thread.range = new vscode.Range(t.thread.range.start, t.thread.range.end);
+    }
+  }
+
   let renderGen = 0;
   async function render(root: vscode.Uri, comments: ProjectComment[]) {
     const gen = ++renderGen;
@@ -136,6 +146,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       threads.push({ thread, comment: c, pos: a.start });
     }
     treeChanged.fire();
+    for (const e of vscode.window.visibleTextEditors) poke(e.document.uri);
   }
 
   let lastFetch = 0;
@@ -230,6 +241,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     treeChanged,
     output,
     statusItem,
+    vscode.window.onDidChangeActiveTextEditor(e => e && poke(e.document.uri)),
+    vscode.window.onDidChangeVisibleTextEditors(es => es.forEach(e => poke(e.document.uri))),
     vscode.window.onDidChangeWindowState(w => {
       const mins = cfg().get<number>('refreshMinutes') ?? 0;
       if (w.focused && mins > 0 && lastFetch && Date.now() - lastFetch > mins * 60_000) void refresh();
