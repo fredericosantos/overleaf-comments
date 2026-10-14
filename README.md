@@ -13,7 +13,7 @@ Comments are cached in VS Code workspace storage (outside the repo), never commi
 - **Reply:** type in a thread's reply box. The box clears at once and your text shows as "Syncing…" until Overleaf has it; if the send fails the text is removed again and you get **Retry** and **Copy text**.
 - **Resolve / reopen:** the check button on a thread, **Resolve** in the hover, or the sidebar. The comment moves between the text and the sidebar's resolved list immediately, and stays there even if Overleaf is slow to report it; if Overleaf refuses it moves back and the error is shown.
 - **New comment:** select text, click the `+` in the gutter, type. With nothing selected it anchors to the clicked line's text; a blank line is anchored to its line break. The extension asks Overleaf to anchor to that exact occurrence (also on CRLF files) and warns if Overleaf attached it to different text. If the text is not in Overleaf's copy yet, it offers to commit that one file and push the current branch, then adds the comment (it refuses a detached HEAD or a branch without an upstream).
-- **Close:** each open thread's header has a Close button (collapse). Threads open only from the comment icon or the sidebar, never by clicking the text.
+- **Close:** each open thread's header has a Close button (collapse), and clicking anywhere else in the text closes open comments (clicking inside a comment's own text leaves it open). Threads open only from the comment icon or the sidebar, never by clicking the text.
 
 Comment widgets always open below their line; VS Code has no setting for placing them above, and no extension API to focus a thread's reply box (the hover's Reply is best effort).
 

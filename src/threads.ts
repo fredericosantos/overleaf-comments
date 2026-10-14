@@ -119,6 +119,17 @@ export class Threads implements vscode.Disposable {
     this.highlights.apply();
   }
 
+  /** A click elsewhere in the text closes open comments; a click inside a comment's own text leaves that one alone.
+   * No event tells us whether the user opened a thread, so every other thread of the file is closed: setting it open
+   * and then closed makes sure the change is always sent, even if our idea of its state is stale. */
+  collapseOutside(uri: vscode.Uri, selection: vscode.Selection): void {
+    for (const x of this.entries) {
+      if (x.thread.uri.toString() !== uri.toString() || x.thread.range.intersection(selection)) continue;
+      x.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+      x.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
+    }
+  }
+
   /** Drop every thread (Clear Session Cookie); a render in flight becomes stale. */
   clear(): void {
     ++this.renderGen;

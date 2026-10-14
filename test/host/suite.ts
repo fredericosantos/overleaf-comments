@@ -79,6 +79,16 @@ export async function run(): Promise<void> {
 
   await seed();
   assert.deepEqual(api.tree(), [{ file: 'chap/f10.tex', threads: ['c1'] }]); // sidebar tree mirrors the thread
+  {
+    // a click elsewhere in the text closes an open comment; a click inside its own text leaves it open
+    const th = api.thread(0);
+    const r0 = th.range;
+    th.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    api.clickAt(uri, new vscode.Selection(r0.start, r0.start));
+    assert.equal(th.collapsibleState, vscode.CommentThreadCollapsibleState.Expanded, 'a click inside the comment text keeps it open');
+    api.clickAt(uri, new vscode.Selection(0, 0, 0, 0));
+    assert.equal(th.collapsibleState, vscode.CommentThreadCollapsibleState.Collapsed, 'a click elsewhere closes it');
+  }
   const lensTitles = async () => (await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri)).map(l => l.command?.title);
   assert.deepEqual(await lensTitles(), []); // no CodeLens line above comments
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.thread(0), text: '  hello  ' });

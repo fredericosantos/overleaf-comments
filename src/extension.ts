@@ -23,6 +23,8 @@ export interface ExtensionApi {
   idle(): Promise<void>;
   setPrompts(p: Prompts): void;
   useClient(c: Client): void;
+  /** A mouse click in the text, as the selection event would report it. */
+  clickAt(uri: vscode.Uri, selection: vscode.Selection): void;
   /** A thread as the UI's "+" creates it (not yet known to Overleaf). */
   newThread(uri: vscode.Uri, range: vscode.Range): vscode.CommentThread;
   thread(i: number): vscode.CommentThread;
@@ -64,6 +66,9 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
       }
     }),
     vscode.workspace.onDidChangeTextDocument(e => threads.onTextChange(e)),
+    vscode.window.onDidChangeTextEditorSelection(e => {
+      if (e.kind === vscode.TextEditorSelectionChangeKind.Mouse) threads.collapseOutside(e.textEditor.document.uri, e.selections[0]);
+    }),
     command('reply', (r: Reply) => writes.onReply(r)),
     command('resolve', (t: vscode.CommentThread) => { const e = threads.entries.find(x => x.thread === t); return e && writes.track(writes.setResolved(e.comment.threadId, true)); }),
     command('close', (t: vscode.CommentThread) => { t.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed; }),
@@ -106,6 +111,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     idle: writes.drain,
     setPrompts: p => { writes.prompts = p; },
     useClient: c => { session.injected = c; },
+    clickAt: (uri, selection) => threads.collapseOutside(uri, selection),
     newThread: (uri, at) => threads.controller.createCommentThread(uri, at, []),
     thread: i => threads.entries[i].thread,
     tree: () => tree.getChildren().map(f => (f.kind === 'file' ? { file: f.path, threads: f.comments.map(c => `${c.resolved ? '[resolved] ' : ''}${firstText(c)}`) } : { file: '', threads: [] })),
