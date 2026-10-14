@@ -1,66 +1,23 @@
 # Overleaf Comments
 
-VS Code extension that shows Overleaf review comments (threads, replies, resolved state) next to your
-text, for projects you sync with Overleaf's git bridge. Git carries your files; comments live only in
-Overleaf's UI, so this fetches them live and renders them with VS Code's native comments UI.
-
-Comments are cached in VS Code workspace storage (outside the repo), never committed.
-
-> Not affiliated with, endorsed by or sponsored by Overleaf. "Overleaf" is a trademark of its owner; it is used here only to say which service this works with.
-
-## What you can do
-
-- **Read:** open comments are drawn in the text as a faint highlight (exactly the commented text, or whole lines when the comment spans several lines) with VS Code's native comment icon, which sits on the last line of a multi-line comment, where the thread opens.
-- **Sidebar:** the **Overleaf Comments** view in the activity bar lists every comment, open and resolved, by file (drag the view to the secondary side bar to keep it on the right). Click one to jump to it; open ones have Reply and Resolve buttons, resolved ones a Reopen button. Resolved comments are shown only here, never in the text. The extension sets `comments.openView` to `never` so VS Code's own bottom Comments panel does not also open by itself (you can still open or hide it by hand).
-- **Reply:** type in a thread's reply box. The box clears at once and your text shows as "Syncing…" until Overleaf has it; if the send fails the text is removed again and you get **Retry** and **Copy text**.
-- **Resolve / reopen:** the check button on a thread, or the sidebar. The comment moves between the text and the sidebar's resolved list immediately, and stays there even if Overleaf is slow to report it; if Overleaf refuses it moves back and the error is shown.
-- **New comment:** select text, click the `+` in the gutter, type. With nothing selected it anchors to the clicked line's text; a blank line is anchored to its line break. The extension asks Overleaf to anchor to that exact occurrence (also on CRLF files) and warns if Overleaf attached it to different text. If the text is not in Overleaf's copy yet (you wrote it locally and have not pushed), nothing is pushed for you and no alarm is shown: the comment stays in its thread marked **Not synced** and drawn differently from synced ones (the same orange highlight, but with a dashed outline; VS Code's own comment icon cannot be changed per thread), with **Retry sync** and **Discard** buttons, and it is added automatically after a later refresh once the text is on Overleaf (push the way you normally do). Unsynced comments live only in the open window; Discard or closing the window forgets them.
-- **Tall threads:** a thread taller than about 24 lines shows its first comment and the latest ones that fit, with "N more comments hidden. Show entire thread" in between; the header's **Show entire comments** button lifts the cut. The extension also turns VS Code's `comments.maxHeight` off, so a comment is never given its own scrollbar: what you expand is shown in full.
-- **Long comments:** a comment longer than 5 lines (or 400 characters) is collapsed in the thread with a **Show more…** link (then **Show less**), like Overleaf, so the thread itself is what scrolls, not each comment. A thread that has a long comment also gets a **Show entire comments** button next to Resolve (then **Collapse comments**).
-- **Closing:** VS Code's own collapse arrow closes a thread, and clicking anywhere else in the text closes open comments (clicking inside a comment's own text leaves it open). Threads open only from the comment icon or the sidebar, never by clicking the text.
-
-Comment widgets always open below their line; VS Code has no setting for placing them above, and no extension API to focus a thread's reply box (the sidebar's Reply is best effort).
-
-## Requirements
-
-- **Nothing else to install.** The Overleaf client (olcli) is bundled inside the extension; you do not need the `olcli` command.
-- **A git clone of your Overleaf project**, with Overleaf as its remote (`https://git.overleaf.com/<project id>`). Overleaf's git integration is only available on some plans; check that yours includes it.
-- **Your Overleaf session cookie** (see below). It stays in VS Code's secret storage, on your machine.
+See, reply to, resolve and add Overleaf review comments inside VS Code, for projects you sync with Overleaf's git bridge.
 
 ## Use
 
-1. Open the git clone of your Overleaf project (remote `https://git.overleaf.com/<project id>`).
-2. Run **Overleaf Comments: Set Session Cookie** and paste your `overleaf_session2` cookie
-   (browser devtools → Storage → Cookies → overleaf.com). It is kept in VS Code SecretStorage.
-3. Comments appear in the text and in the **Overleaf Comments** sidebar. **Overleaf Comments: Refresh** re-fetches. The extension stays quiet in git repositories that are not Overleaf projects.
+1. Open your git clone of the Overleaf project (remote `https://git.overleaf.com/<project id>`; needs an Overleaf plan with git integration).
+2. Run **Overleaf Comments: Set Session Cookie** and paste your `overleaf_session2` cookie (kept in VS Code's secret storage).
+3. Comments appear in the text and in the **Overleaf Comments** sidebar. Select text and click the `+` in the gutter to add one.
 
-Settings: `overleafComments.projectId` (override git-remote detection), `overleafComments.baseUrl`
-(self-hosted), `overleafComments.refreshMinutes` (re-fetch on window focus when older than N minutes; default 5, 0 = off).
+Nothing else to install (the Overleaf client is bundled). Comment on text you haven't pushed yet and it waits as "Not synced", then sends itself once Overleaf has the text.
 
-For scripted or throwaway launches you can instead start VS Code with `OVERLEAF_SESSION_COOKIE` set in its environment; the stored cookie takes precedence.
-
-If you see "No session cookie", this VS Code profile has no cookie yet: run **Overleaf Comments: Set Session Cookie** once (the cookie is stored per VS Code profile).
-
-Anchors are matched by the commented text, nearest to Overleaf's offset, and followed through your edits and through `git pull` (VS Code reloads a pulled file as one edit from the first to the last changed line; the comment moves with its text, and is marked lost only if the pull rewrites the commented text itself); if you edit inside the commented text and it can no longer be found, the thread is labelled "Anchor lost" at its last position.
-
-Install a built package with `code --install-extension overleaf-comments.vsix`
-(`npx @vscode/vsce package --no-dependencies -o overleaf-comments.vsix` after building).
-**Overleaf Comments: Clear Session Cookie** removes the stored cookie and cached comments.
+Settings: `overleafComments.projectId`, `overleafComments.baseUrl`, `overleafComments.refreshMinutes`.
 
 ## Develop
 
 ```sh
 git clone --recurse-submodules https://github.com/fredericosantos/overleaf-comments
 cd overleaf-comments/vendor/olcli && npm ci && npm run build && cd ../..
-npm install && npm test && npm run build   # npm test is plain node (pure logic + a real-git test): opens nothing
-npm run dev          # OPENS a throwaway VS Code window on a scratch Overleaf project (needs olcli logged in)
-npm run test:host   # OPENS an isolated VS Code window for ~15 s (set VSCODE_EXECUTABLE if not in /Applications)
-code --extensionDevelopmentPath=$PWD <your-overleaf-clone>
+npm install && npm test && npm run build
 ```
 
-Built on a fork of [olcli](https://github.com/aloth/olcli) (`vendor/olcli`) whose comment listing is
-about 2.5x faster (parallel sockets); the upstream PR is tracked in issue #1.
-
-## License and credits
-
-MIT (see `LICENSE`). The icon is built from [Lucide](https://lucide.dev) icons (ISC). The extension bundles [olcli](https://github.com/aloth/olcli) (MIT) and its dependencies; see `THIRD_PARTY_NOTICES.md`.
+MIT. Not affiliated with Overleaf. Icon from [Lucide](https://lucide.dev) (ISC); bundled third-party code is listed in `THIRD_PARTY_NOTICES.md`.
