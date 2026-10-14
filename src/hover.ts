@@ -37,11 +37,10 @@ export function hoverContent(c: ProjectComment): HoverContent {
   };
 }
 
-export const HOVER_COMMANDS = ['overleafComments.hoverReply', 'overleafComments.hoverResolve', 'overleafComments.hoverReopen'];
+export const HOVER_COMMANDS = ['overleafComments.hoverReply', 'overleafComments.hoverResolve'];
 
-/** Markdown command links shown at the top of the hover: Reply, and Resolve (Reopen when already resolved). */
+/** Markdown command links at the top of the hover: Reply and Resolve (only open comments are drawn in the editor). */
 export function actionLinks(c: ProjectComment): string {
   const arg = encodeURIComponent(JSON.stringify([c.threadId]));
-  const link = (label: string, cmd: string) => `[${label}](command:${cmd}?${arg})`;
-  return `${link('Reply', 'overleafComments.hoverReply')} · ${c.resolved ? link('Reopen', 'overleafComments.hoverReopen') : link('Resolve', 'overleafComments.hoverResolve')}`;
+  return `[Reply](command:overleafComments.hoverReply?${arg}) · [Resolve](command:overleafComments.hoverResolve?${arg})`;
 }

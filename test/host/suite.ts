@@ -80,9 +80,6 @@ export async function run(): Promise<void> {
   await seed();
   await vscode.commands.executeCommand('overleafComments.resolve', api.thread(0));
   assert.deepEqual(calls.pop(), ['resolve', '0123456789abcdef01234567', 'T1']);
-  await seed();
-  await vscode.commands.executeCommand('overleafComments.reopen', api.thread(0));
-  assert.deepEqual(calls.pop(), ['reopen', '0123456789abcdef01234567', 'T1']);
 
   // hover links run the same actions by thread id
   api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d });
@@ -94,9 +91,6 @@ export async function run(): Promise<void> {
   await seed();
   await vscode.commands.executeCommand('overleafComments.hoverResolve', 'T1');
   assert.deepEqual(calls.pop(), ['resolve', '0123456789abcdef01234567', 'T1']);
-  await seed();
-  await vscode.commands.executeCommand('overleafComments.hoverReopen', 'T1');
-  assert.deepEqual(calls.pop(), ['reopen', '0123456789abcdef01234567', 'T1']);
 
   const g = doc.getText().indexOf('gamma delta');
   const fresh = api.newThread(uri, new vscode.Range(doc.positionAt(g), doc.positionAt(g + 'gamma delta'.length)));
@@ -162,19 +156,26 @@ export async function run(): Promise<void> {
     assert.equal(t0.comments.length, 3, 'rolled back after the failure');
 
     fail = false; hold();
+    const inEditor = () => api.threads().filter(x => x.uri === uri.toString()).length;
     const p3 = vscode.commands.executeCommand('overleafComments.resolve', t0);
     await sleep(150);
-    assert.equal(t0.state, vscode.CommentThreadState.Resolved, 'looks resolved immediately');
+    assert.equal(inEditor(), 0, 'a resolved comment leaves the editor at once');
+    assert.match(api.tree()[0].threads[0], /^\[resolved\]/, 'and shows as resolved in the sidebar');
     open(); await p3;
-    assert.equal(api.thread(0), t0);
-    assert.deepEqual(api.threads().filter(x => x.uri === uri.toString()).map(x => x.resolved), [true], 'resolved thread stays visible');
+    assert.equal(inEditor(), 0, 'still not in the editor once synced');
+    assert.match(api.tree()[0].threads[0], /^\[resolved\]/, 'still listed as resolved in the sidebar');
 
+    // resolve refused by Overleaf: the comment comes back
+    server.resolved = false;
+    await api.seedCacheAndRefresh([], true);
+    assert.equal(inEditor(), 1);
     fail = true; hold();
-    const p4 = vscode.commands.executeCommand('overleafComments.reopen', t0);
+    const p4 = vscode.commands.executeCommand('overleafComments.resolve', api.thread(0));
     await sleep(150);
-    assert.equal(t0.state, vscode.CommentThreadState.Unresolved, 'reopen shows at once');
+    assert.equal(inEditor(), 0, 'optimistic: gone from the editor while syncing');
     open(); await p4;
-    assert.equal(t0.state, vscode.CommentThreadState.Resolved, 'reverted when Overleaf refuses');
+    assert.equal(inEditor(), 1, 'rolled back: back in the editor after the failure');
+    assert.doesNotMatch(api.tree()[0].threads[0], /^\[resolved\]/);
 
     fail = false; hold();
     const g2 = doc.getText().indexOf('gamma delta');

@@ -46,7 +46,8 @@ export async function run(): Promise<void> {
       if (!serverResolved) await new Promise(r => setTimeout(r, 2000));
     }
     assert.equal(serverResolved, true, 'server does not show it resolved');
-    assert.equal(api.threads().find(x => x.threadId === threadId)?.resolved, true, 'resolved thread should stay visible, marked resolved');
+    assert.equal(api.threads().some(x => x.threadId === threadId), false, 'a resolved comment must leave the editor');
+    assert.ok(api.tree().some(f => f.threads.some(t => t.startsWith('[resolved] '))), 'and be listed as resolved in the sidebar');
   } finally {
     if (threadId) await real.deleteComment(id, threadId); // leave the scratch project as we found it
   }

@@ -14,7 +14,7 @@ Comments are cached in VS Code workspace storage (outside the repo), never commi
 - **Hover:** hovering the highlighted text shows the thread (long threads are clipped: first 2 and latest 3 messages, 400 characters each) with **Reply** and **Resolve**/**Reopen** links. Threads open only from VS Code's comment icon or the side panel, never by clicking the text.
 - **Buttons:** each thread has Reply (the reply box), Resolve/Reopen and Close (collapse) in its header.
 - **Reply:** type in the thread's reply box, or use the reply button in the sidebar.
-- **Resolve / reopen:** the check button on a thread. It looks resolved immediately and reverts with an error if Overleaf refuses. Resolved threads stay visible (and in the Comments panel), greyed, and can be reopened.
+- **Resolve / reopen:** the check button on a thread, or Resolve in the hover. The comment leaves the text at once and moves to the sidebar's resolved list (resolved comments are never drawn in the editor); it reverts with an error if Overleaf refuses. Reopen it from the sidebar.
 - **New comment:** select text, click the `+` in the gutter, type. With nothing selected it anchors to the clicked line's text, and a blank line is anchored to its line break. the extension asks Overleaf to anchor to that exact occurrence and warns if Overleaf attached it to different text (for example when your local file differs from Overleaf's copy; `git pull` first).
 
 Comment widgets always open below their line; VS Code has no setting for placing them above.

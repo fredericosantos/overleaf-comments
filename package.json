@@ -39,11 +39,6 @@
         "icon": "$(check)"
       },
       {
-        "command": "overleafComments.reopen",
-        "title": "Reopen thread",
-        "icon": "$(debug-restart)"
-      },
-      {
         "command": "overleafComments.treeReply",
         "title": "Reply",
         "icon": "$(comment)"
@@ -74,10 +69,6 @@
       {
         "command": "overleafComments.hoverResolve",
         "title": "Overleaf Comments: hoverResolve"
-      },
-      {
-        "command": "overleafComments.hoverReopen",
-        "title": "Overleaf Comments: hoverReopen"
       }
     ],
     "configuration": {
@@ -112,10 +103,6 @@
           "when": "false"
         },
         {
-          "command": "overleafComments.reopen",
-          "when": "false"
-        },
-        {
           "command": "overleafComments.treeReply",
           "when": "false"
         },
@@ -142,10 +129,6 @@
         {
           "command": "overleafComments.hoverResolve",
           "when": "false"
-        },
-        {
-          "command": "overleafComments.hoverReopen",
-          "when": "false"
         }
       ],
       "comments/commentThread/context": [
@@ -159,12 +142,7 @@
         {
           "command": "overleafComments.resolve",
           "group": "navigation",
-          "when": "commentController == overleaf && commentThread == open"
-        },
-        {
-          "command": "overleafComments.reopen",
-          "group": "navigation",
-          "when": "commentController == overleaf && commentThread == resolved"
+          "when": "commentController == overleaf"
         },
         {
           "command": "overleafComments.close",

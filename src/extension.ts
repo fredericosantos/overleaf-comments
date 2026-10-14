@@ -46,7 +46,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   const controller = vscode.comments.createCommentController('overleaf', 'Overleaf');
   const output = vscode.window.createOutputChannel('Overleaf Comments');
   // Each thread remembers its comment and last known offset so edits can re-anchor it.
-  let threads: { thread: vscode.CommentThread; comment: ProjectComment; pos: number }[] = [];
+  let threads: { thread: vscode.CommentThread; comment: ProjectComment; pos: number }[] = []; // editor threads: OPEN comments only
+  let all: ProjectComment[] = []; // every comment (open + resolved): resolved ones live only in the sidebar
   let client: Pick<OverleafClient, 'listComments' | 'addComment' | 'postCommentMessage' | 'resolveComment' | 'reopenComment'> | undefined;
   const isTex = (doc: vscode.TextDocument) => doc.uri.scheme === 'file' && /\.tex$/i.test(doc.uri.fsPath);
   controller.commentingRangeProvider = {
@@ -73,36 +74,38 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     return client;
   }
 
-  // Sidebar tree: files -> threads -> messages. Rebuilt from `threads` whenever they change.
-  type Node = { kind: 'file'; path: string; entries: (typeof threads)[number][] } | { kind: 'thread'; entry: (typeof threads)[number] } | { kind: 'msg'; m: CommentMessage };
+  // Sidebar tree: files -> threads (open and resolved) -> messages. Built from `all`.
+  type Node = { kind: 'file'; path: string; comments: ProjectComment[] } | { kind: 'thread'; c: ProjectComment } | { kind: 'msg'; m: CommentMessage };
   const treeChanged = new vscode.EventEmitter<void>();
-  const entryText = (e: (typeof threads)[number]) => e.comment.messages[0]?.content ?? '(no text)';
+  const firstText = (c: ProjectComment) => c.messages[0]?.content ?? '(no text)';
   const treeProvider: vscode.TreeDataProvider<Node> = {
     onDidChangeTreeData: treeChanged.event,
     getChildren(n) {
       if (!n) {
-        const byFile = new Map<string, (typeof threads)[number][]>();
-        for (const e of threads) byFile.set(e.comment.path, [...(byFile.get(e.comment.path) ?? []), e]);
-        return [...byFile].sort(([a], [b]) => a.localeCompare(b)).map(([path, entries]) => ({ kind: 'file', path, entries }));
+        const byFile = new Map<string, ProjectComment[]>();
+        for (const c of all) byFile.set(c.path, [...(byFile.get(c.path) ?? []), c]);
+        return [...byFile].sort(([a], [b]) => a.localeCompare(b)).map(([path, comments]) => ({ kind: 'file', path, comments: comments.sort((x, y) => x.position - y.position) }));
       }
-      if (n.kind === 'file') return n.entries.map(entry => ({ kind: 'thread', entry }));
-      if (n.kind === 'thread') return n.entry.comment.messages.map(m => ({ kind: 'msg', m }));
+      if (n.kind === 'file') return n.comments.map(c => ({ kind: 'thread', c }));
+      if (n.kind === 'thread') return n.c.messages.map(m => ({ kind: 'msg', m }));
       return [];
     },
     getTreeItem(n) {
       if (n.kind === 'file') {
         const it = new vscode.TreeItem(n.path, vscode.TreeItemCollapsibleState.Expanded);
-        it.description = `${n.entries.length}`;
+        const done = n.comments.filter(c => c.resolved).length;
+        it.description = done ? `${n.comments.length - done} open · ${done} resolved` : `${n.comments.length}`;
         it.iconPath = vscode.ThemeIcon.File;
         return it;
       }
       if (n.kind === 'thread') {
-        const e = n.entry;
-        const it = new vscode.TreeItem(entryText(e).split('\n')[0].slice(0, 60), vscode.TreeItemCollapsibleState.Collapsed);
-        it.description = `L${e.thread.range.start.line + 1} · ${author(e.comment.messages[0] ?? ({} as CommentMessage))}${e.comment.messages.length > 1 ? ` · ${e.comment.messages.length - 1} repl${e.comment.messages.length === 2 ? 'y' : 'ies'}` : ''}`;
-        it.tooltip = `${e.comment.selectedText}\n\n${e.comment.messages.map(m => `${author(m)}: ${m.content}`).join('\n')}`;
-        it.iconPath = new vscode.ThemeIcon(e.comment.resolved ? 'pass' : 'comment');
-        it.contextValue = e.comment.resolved ? 'resolved' : 'open';
+        const c = n.c;
+        const live = threads.find(t => t.comment.threadId === c.threadId);
+        const it = new vscode.TreeItem(firstText(c).split('\n')[0].slice(0, 60), vscode.TreeItemCollapsibleState.Collapsed);
+        it.description = `L${(live ? live.thread.range.start.line : c.line - 1) + 1} · ${author(c.messages[0] ?? ({} as CommentMessage))}${c.messages.length > 1 ? ` · ${c.messages.length - 1} repl${c.messages.length === 2 ? 'y' : 'ies'}` : ''}${c.resolved ? ' · resolved' : ''}`;
+        it.tooltip = `${c.selectedText}\n\n${c.messages.map(m => `${author(m)}: ${m.content}`).join('\n')}`;
+        it.iconPath = c.resolved ? new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed')) : new vscode.ThemeIcon('comment');
+        it.contextValue = c.resolved ? 'resolved' : 'open';
         it.command = { command: 'overleafComments.treeReveal', title: 'Show in editor', arguments: [n] };
         return it;
       }
@@ -114,7 +117,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     },
   };
   const treeView = vscode.window.createTreeView('overleafComments.threads', { treeDataProvider: treeProvider });
-  const threadOf = (n: Node) => (n.kind === 'thread' ? n.entry : undefined);
+  const commentOf = (n: Node) => (n.kind === 'thread' ? n.c : undefined);
 
   /** VS Code can leave a thread's gutter marker undrawn in an editor that was already open when the thread was
    * created, until the thread is touched. Re-assigning the range for a document's threads redraws them. */
@@ -132,6 +135,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   let renderGen = 0;
   async function render(root: vscode.Uri, comments: ProjectComment[]) {
     const gen = ++renderGen;
+    const model = comments;
+    comments = comments.filter(c => !c.resolved); // resolved comments are not drawn in the editor
     // Open docs first, then swap threads in one step; a newer render supersedes this one.
     const docs = await Promise.all(comments.map(async c => {
       const uri = vscode.Uri.joinPath(root, c.path.replace(/^\/+/, ''));
@@ -143,6 +148,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       }
     }));
     if (gen !== renderGen) return;
+    all = model;
     const skipped = docs.filter(d => !d).length;
     if (skipped) void vscode.window.showWarningMessage(`Overleaf Comments: ${skipped} comment thread(s) hidden because their file is not in this workspace (git pull?).`);
     // Update existing threads in place (no tear-down), so nothing blinks and open/closed state is kept.
@@ -351,15 +357,35 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     await vscode.commands.executeCommand('editor.action.nextCommentThreadAction');
   }
 
-  async function setResolved(thread: vscode.CommentThread, resolved: boolean) {
+  /** Resolve/reopen. Optimistic: the comment moves between the editor and the sidebar's resolved list at once;
+   * if Overleaf refuses, it moves back and write() has shown the error. */
+  async function setResolvedById(id: string, resolved: boolean) {
+    const c = all.find(x => x.threadId === id);
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!c || !folder || c.resolved === resolved) return;
+    c.resolved = resolved;
+    await render(folder.uri, all);
+    const res = await write(resolved ? 'Resolve' : 'Reopen', (cl, pid) => (resolved ? cl.resolveComment(pid, id) : cl.reopenComment(pid, id)));
+    if (!res.ok) {
+      c.resolved = !resolved;
+      await render(folder.uri, all);
+    }
+  }
+  const resolveThread = (thread: vscode.CommentThread) => {
     const known = threads.find(t => t.thread === thread);
-    if (!known) return;
-    // Show it as done right away; if the server refuses, revert and the error is shown by write().
-    const before = { state: thread.state, context: thread.contextValue };
-    thread.state = resolved ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
-    thread.contextValue = resolved ? 'resolved' : 'open';
-    const res = await write(resolved ? 'Resolve' : 'Reopen', (c, id) => (resolved ? c.resolveComment(id, known.comment.threadId) : c.reopenComment(id, known.comment.threadId)));
-    if (!res.ok) { thread.state = before.state; thread.contextValue = before.context; }
+    return known ? setResolvedById(known.comment.threadId, true) : Promise.resolve();
+  };
+
+  /** A resolved comment has no editor thread: just take the user to its text. */
+  async function revealResolved(c: ProjectComment) {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder) return;
+    const uri = vscode.Uri.joinPath(folder.uri, c.path.replace(/^\/+/, ''));
+    const doc = await vscode.workspace.openTextDocument(uri);
+    const a = locate(doc.getText(), c.position, c.selectedText);
+    const range = new vscode.Range(doc.positionAt(a.start), doc.positionAt(a.end));
+    const editor = await vscode.window.showTextDocument(doc, { selection: range });
+    editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
   }
 
   ctx.subscriptions.push(
@@ -386,16 +412,14 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       treeChanged.fire();
     }),
     vscode.commands.registerCommand('overleafComments.reply', replyOrCreate),
-    vscode.commands.registerCommand('overleafComments.resolve', (t: vscode.CommentThread) => setResolved(t, true)),
-    vscode.commands.registerCommand('overleafComments.reopen', (t: vscode.CommentThread) => setResolved(t, false)),
-    vscode.commands.registerCommand('overleafComments.treeReveal', (n: Node) => { const e = threadOf(n); return e && revealEntry(e); }),
-    vscode.commands.registerCommand('overleafComments.treeReply', (n: Node) => { const e = threadOf(n); return e && focusReply(e); }),
-    vscode.commands.registerCommand('overleafComments.treeResolve', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, true); }),
-    vscode.commands.registerCommand('overleafComments.treeReopen', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, false); }),
+    vscode.commands.registerCommand('overleafComments.resolve', (t: vscode.CommentThread) => resolveThread(t)),
+    vscode.commands.registerCommand('overleafComments.treeReveal', (n: Node) => { const c = commentOf(n); if (!c) return; const e = byId(c.threadId); return e ? revealEntry(e) : revealResolved(c); }),
+    vscode.commands.registerCommand('overleafComments.treeReply', (n: Node) => { const c = commentOf(n); const e = c && byId(c.threadId); return e && focusReply(e); }),
+    vscode.commands.registerCommand('overleafComments.treeResolve', (n: Node) => { const c = commentOf(n); return c && setResolvedById(c.threadId, true); }),
+    vscode.commands.registerCommand('overleafComments.treeReopen', (n: Node) => { const c = commentOf(n); return c && setResolvedById(c.threadId, false); }),
     vscode.commands.registerCommand('overleafComments.close', (t: vscode.CommentThread) => { t.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed; }),
     vscode.commands.registerCommand('overleafComments.hoverReply', (id: string) => { const e = byId(id); return e && focusReply(e); }),
-    vscode.commands.registerCommand('overleafComments.hoverResolve', (id: string) => { const e = byId(id); return e && setResolved(e.thread, true); }),
-    vscode.commands.registerCommand('overleafComments.hoverReopen', (id: string) => { const e = byId(id); return e && setResolved(e.thread, false); }),
+    vscode.commands.registerCommand('overleafComments.hoverResolve', (id: string) => setResolvedById(id, true)),
     vscode.commands.registerCommand('overleafComments.refresh', () =>
       vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Overleaf comments' }, () => refresh())),
     vscode.commands.registerCommand('overleafComments.clearCookie', async () => {
@@ -407,6 +431,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       lastFetch = 0; // focus-refresh only runs after a successful fetch
       threads.forEach(t => t.thread.dispose());
       threads = [];
+      all = [];
       treeChanged.fire();
     }),
     vscode.commands.registerCommand('overleafComments.setCookie', async () => {
@@ -428,7 +453,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     useClient: c => { injected = c; },
     newThread: (uri, range) => controller.createCommentThread(uri, range, []),
     thread: i => threads[i].thread,
-    tree: () => (treeProvider.getChildren(undefined) as Node[]).map(f => f.kind === 'file' ? { file: f.path, threads: f.entries.map(entryText) } : { file: '', threads: [] }),
+    tree: () => (treeProvider.getChildren(undefined) as Node[]).map(f => f.kind === 'file' ? { file: f.path, threads: f.comments.map(c => `${c.resolved ? '[resolved] ' : ''}${firstText(c)}`) } : { file: '', threads: [] }),
     storeCookie: v => Promise.resolve(ctx.secrets.store(COOKIE_KEY, v)),
     status: () => statusItem.text,
     seedCacheAndRefresh: async (comments, fetch) => {

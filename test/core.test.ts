@@ -51,13 +51,11 @@ test('hover: a wall of huge comments stays bounded; users keep their own color',
   assert.deepEqual([few.lines.length, few.hidden, few.lines[0].text], [3, 0, 'short']);
 });
 
-test('hover action links carry the thread id and swap Resolve/Reopen', () => {
-  const base = { threadId: 'T 1&2', docId: 'd', path: 'a.tex', position: 0, line: 1, column: 1, selectedText: 'x', messages: [] };
-  const open = actionLinks({ ...base, resolved: false });
-  assert.match(open, /\[Reply\]\(command:overleafComments\.hoverReply\?%5B%22T%201%262%22%5D\)/);
-  assert.match(open, /\[Resolve\]\(command:overleafComments\.hoverResolve\?/);
-  assert.ok(!open.includes('Reopen'));
-  assert.match(actionLinks({ ...base, resolved: true }), /\[Reopen\]\(command:overleafComments\.hoverReopen\?/);
+test('hover action links carry the thread id', () => {
+  const base = { threadId: 'T 1&2', docId: 'd', path: 'a.tex', position: 0, line: 1, column: 1, selectedText: 'x', messages: [], resolved: false };
+  const links = actionLinks(base);
+  assert.match(links, /\[Reply\]\(command:overleafComments\.hoverReply\?%5B%22T%201%262%22%5D\)/);
+  assert.match(links, /\[Resolve\]\(command:overleafComments\.hoverResolve\?%5B%22T%201%262%22%5D\)/);
 });
 
 test('highlightShape: text within a line, whole lines across lines or on a blank line', () => {
