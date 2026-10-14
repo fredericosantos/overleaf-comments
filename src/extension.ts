@@ -7,6 +7,7 @@ import { projectIdFromRemote } from './project.ts';
 
 const COOKIE_KEY = 'overleafComments.cookie';
 const CACHE_KEY = 'overleafComments.cache';
+const CACHE_AT_KEY = 'overleafComments.cacheAt';
 const run = promisify(execFile);
 
 /** User-fixable setup problems (no cookie / no remote): reported, but not counted as a fetch attempt. */
@@ -17,6 +18,7 @@ export interface ExtensionApi {
   render(root: vscode.Uri, comments: ProjectComment[]): Promise<void>;
   /** Test seam: put comments in the cache, then refresh (fetch=false renders the cache only). */
   seedCacheAndRefresh(comments: ProjectComment[], fetch: boolean): Promise<void>;
+  status(): string;
   threads(): { uri: string; line: number; label?: string; resolved: boolean; messages: number }[];
 }
 
@@ -76,6 +78,14 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   }
 
   let lastFetch = 0;
+  const statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+  const time = (ms?: number) => (ms ? new Date(ms) : new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  function setStatus(synced: boolean) {
+    const at = ctx.workspaceState.get<number>(CACHE_AT_KEY);
+    statusItem.text = synced ? `$(comment) Overleaf synced ${time(at)}` : `$(warning) Overleaf: cached${at ? ` from ${time(at)}` : ''}`;
+    statusItem.command = 'overleafComments.refresh';
+    statusItem.show();
+  }
   async function refresh(fetch = true) {
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) return;
@@ -88,9 +98,12 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       const status = cfg().get<boolean>('showResolved') ? 'all' : 'open';
       const comments = await (await getClient()).listComments(id, { status });
       await ctx.workspaceState.update(CACHE_KEY, comments);
+      await ctx.workspaceState.update(CACHE_AT_KEY, Date.now());
       lastFetch = Date.now();
+      setStatus(true);
       await render(folder.uri, comments);
     } catch (e) {
+      if (cached) setStatus(false); // stale: showing the last good fetch
       client = undefined; // cookie may have expired; rebuild next time
       // Back off after real failures (e.g. Overleaf 429): the focus refresh waits refreshMinutes before retrying.
       if (!(e instanceof SetupError)) lastFetch = Date.now();
@@ -102,6 +115,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   ctx.subscriptions.push(
     controller,
     output,
+    statusItem,
     vscode.window.onDidChangeWindowState(w => {
       const mins = cfg().get<number>('refreshMinutes') ?? 0;
       if (w.focused && mins > 0 && lastFetch && Date.now() - lastFetch > mins * 60_000) void refresh();
@@ -121,6 +135,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     vscode.commands.registerCommand('overleafComments.clearCookie', async () => {
       await ctx.secrets.delete(COOKIE_KEY);
       await ctx.workspaceState.update(CACHE_KEY, undefined);
+      await ctx.workspaceState.update(CACHE_AT_KEY, undefined);
+      statusItem.hide();
       client = undefined;
       lastFetch = 0; // focus-refresh only runs after a successful fetch
       threads.forEach(t => t.thread.dispose());
@@ -141,6 +157,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   void refresh(false).then(() => refresh());
   return {
     render,
+    status: () => statusItem.text,
     seedCacheAndRefresh: async (comments, fetch) => {
       await ctx.workspaceState.update(CACHE_KEY, comments);
       await refresh(fetch);
