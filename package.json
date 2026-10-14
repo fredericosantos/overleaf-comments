@@ -81,6 +81,11 @@
       {
         "command": "overleafComments.lensReopen",
         "title": "Overleaf Comments: lensReopen"
+      },
+      {
+        "command": "overleafComments.close",
+        "title": "Close",
+        "icon": "$(close)"
       }
     ],
     "configuration": {
@@ -113,6 +118,7 @@
             "type": "string",
             "enum": [
               "glyphMargin",
+              "highlight",
               "inlineBefore",
               "inlineAfter",
               "lineTint",
@@ -124,15 +130,9 @@
           },
           "default": [
             "glyphMargin",
-            "inlineBefore",
-            "inlineAfter",
-            "lineTint",
-            "border",
-            "overviewRuler",
-            "codeLens",
-            "hover"
+            "highlight"
           ],
-          "description": "Extra markers drawn for each Overleaf thread, on top of VS Code's native comment icon. Use 'Overleaf Comments: Choose Markers' to toggle them."
+          "description": "Extra markers drawn for each Overleaf thread, on top of VS Code's native comment icon. Default: the standard icon left of the line numbers and a faint highlight of the commented text. 'Overleaf Comments: Choose Markers' toggles them."
         }
       }
     },
@@ -181,6 +181,10 @@
         {
           "command": "overleafComments.lensReopen",
           "when": "false"
+        },
+        {
+          "command": "overleafComments.close",
+          "when": "false"
         }
       ],
       "comments/commentThread/context": [
@@ -200,6 +204,11 @@
           "command": "overleafComments.reopen",
           "group": "navigation",
           "when": "commentController == overleaf && commentThread == resolved"
+        },
+        {
+          "command": "overleafComments.close",
+          "group": "navigation@9",
+          "when": "commentController == overleaf"
         }
       ],
       "view/item/context": [

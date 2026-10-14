@@ -1,6 +1,7 @@
 // Runs INSIDE the VS Code extension host (see test/host/run.ts).
 import * as vscode from 'vscode';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import type { ProjectComment } from '@aloth/olcli';
 import type { ExtensionApi } from '../../src/extension.ts';
 
@@ -71,8 +72,10 @@ export async function run(): Promise<void> {
 
   await seed();
   assert.deepEqual(api.tree(), [{ file: 'chap/f10.tex', threads: ['c1'] }]); // sidebar tree mirrors the thread
-  const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri);
-  assert.deepEqual(lenses.map(l => l.command?.title), ['💬 2 comments', 'Reply', 'Resolve']); // clickable line above the comment
+  const lensTitles = async () => (await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri)).map(l => l.command?.title);
+  assert.deepEqual(await lensTitles(), []); // default markers: icon + highlight only, no CodeLens
+  await vscode.workspace.getConfiguration('overleafComments').update('markers', ['glyphMargin', 'highlight', 'codeLens'], vscode.ConfigurationTarget.Global);
+  assert.deepEqual(await lensTitles(), ['💬 2 comments', 'Reply', 'Resolve']); // opt-in: clickable line above the comment
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.thread(0), text: '  hello  ' });
   assert.deepEqual(calls.pop(), ['reply', '0123456789abcdef01234567', 'T1', 'hello']);
 
@@ -108,4 +111,36 @@ export async function run(): Promise<void> {
   const blankMid = api.newThread(uri, new vscode.Range(1, 0, 1, 0));
   await vscode.commands.executeCommand('overleafComments.reply', { thread: blankMid, text: 'on a blank line' });
   assert.deepEqual(calls.pop(), ['add', '0123456789abcdef01234567', { filePath: 'chap/f10.tex', content: 'on a blank line', selectedText: '\n', occurrence: doc.getText().slice(0, nl).split('\n').length }]);
+
+  // text that is not on Overleaf yet: decline -> nothing pushed, no extra add; accept -> commit, push, retry add
+  const git = (...a: string[]) => execFileSync('git', a, { cwd: process.env.OLC_TEST_WS }).toString().trim();
+  const bare = (...a: string[]) => execFileSync('git', ['--git-dir', process.env.OLC_TEST_REMOTE!, ...a]).toString().trim();
+  let attempts = 0;
+  api.useClient({
+    listComments: async () => [],
+    addComment: async (id: string, o: unknown) => {
+      attempts++;
+      if (attempts <= 2) throw new Error('Selected text not found in chap/f10.tex'); // attempt 1: decline path, attempt 2: first try of the accept path
+      calls.push(['add', id, o]);
+      return { ...comment('T9', 'x', 0) };
+    },
+    postCommentMessage: async () => null, resolveComment: async () => comment('T', 'x', 0), reopenComment: async () => comment('T', 'x', 0),
+  } as never);
+  const edit2 = new vscode.WorkspaceEdit();
+  edit2.insert(uri, doc.positionAt(doc.getText().length), 'brand new local text\n');
+  await vscode.workspace.applyEdit(edit2);
+  const at2 = doc.getText().indexOf('brand new local text');
+  const rng = () => new vscode.Range(doc.positionAt(at2), doc.positionAt(at2 + 'brand new local text'.length));
+
+  api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d });
+  await vscode.commands.executeCommand('overleafComments.reply', { thread: api.newThread(uri, rng()), text: 'declined' });
+  assert.equal(calls.length, 0);
+  assert.throws(() => bare('log', '--oneline'), 'nothing may be pushed when the user declines');
+
+  api.setPrompts({ confirmPush: async () => true, commitMessage: async d => `${d} (test)` });
+  await vscode.commands.executeCommand('overleafComments.reply', { thread: api.newThread(uri, rng()), text: 'accepted' });
+  assert.equal(calls.length, 1, 'comment added after the push');
+  assert.match(git('log', '--format=%s', '-1'), /^Update chap\/f10\.tex \(test\)$/);
+  assert.equal(bare('log', '--format=%s', '-1'), git('log', '--format=%s', '-1'), 'remote has the commit');
+  assert.equal(doc.isDirty, false, 'file saved before committing');
 }

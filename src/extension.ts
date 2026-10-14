@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { OverleafClient, type ProjectComment, type CommentMessage } from '@aloth/olcli';
 import { locate, occurrenceAt } from './anchor.ts';
 import { projectIdFromRemote } from './project.ts';
-import { Markers, ALL_MARKERS, type Marker } from './markers.ts';
+import { Markers, ALL_MARKERS, DEFAULT_MARKERS, type Marker } from './markers.ts';
 
 const COOKIE_KEY = 'overleafComments.cookie';
 const CACHE_KEY = 'overleafComments.cache';
@@ -12,7 +12,8 @@ const CACHE_AT_KEY = 'overleafComments.cacheAt';
 const run = promisify(execFile);
 
 const MARKER_HELP: Record<Marker, string> = {
-  glyphMargin: 'icon left of the line numbers (orange open, green resolved)',
+  glyphMargin: 'standard comment icon left of the line numbers (green check when resolved)',
+  highlight: 'faint background on the commented text only',
   inlineBefore: '💬 at the start of the commented text',
   inlineAfter: '💬 N at the end of the line',
   lineTint: 'tinted background on the line',
@@ -24,6 +25,13 @@ const MARKER_HELP: Record<Marker, string> = {
 
 /** User-fixable setup problems (no cookie / no remote): reported, but not counted as a fetch attempt. */
 class SetupError extends Error {}
+/** The user said no to a prompt: stop quietly, no error toast. */
+class Cancelled extends Error {}
+
+export interface Prompts {
+  confirmPush(message: string, okLabel: string): Thenable<boolean>;
+  commitMessage(defaultMessage: string): Thenable<string | undefined>;
+}
 
 export interface ExtensionApi {
   /** Test seam: render fixture comments without touching the network. */
@@ -32,6 +40,8 @@ export interface ExtensionApi {
   seedCacheAndRefresh(comments: ProjectComment[], fetch: boolean): Promise<void>;
   /** Test seam: store a cookie as the Set Session Cookie command would. */
   storeCookie(value: string): Promise<void>;
+  /** Test seam: replace the confirmation/commit-message prompts of the commit-and-push flow. */
+  setPrompts(p: Prompts): void;
   /** Test seam: replace the Overleaf client (no network). */
   useClient(c: Pick<OverleafClient, 'listComments' | 'addComment' | 'postCommentMessage' | 'resolveComment' | 'reopenComment'>): void;
   /** Test seam: create a thread the way the UI's "+" does (not yet known to Overleaf). */
@@ -127,7 +137,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }
   }
 
-  const markers = new Markers(ctx.extensionUri, () => threads, () => cfg().get<Marker[]>('markers') ?? [...ALL_MARKERS]);
+  const markers = new Markers(ctx.extensionUri, () => threads, () => cfg().get<Marker[]>('markers') ?? [...DEFAULT_MARKERS]);
   ctx.subscriptions.push(markers);
 
   let renderGen = 0;
@@ -200,6 +210,29 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }
   }
 
+  let prompts: Prompts = {
+    confirmPush: (m, ok) => vscode.window.showWarningMessage(m, { modal: true }, ok).then(r => r === ok),
+    commitMessage: d => vscode.window.showInputBox({ prompt: 'Commit message', value: d, ignoreFocusOut: true }),
+  };
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const notThere = (e: unknown) => /Selected text not found/.test(String(e));
+
+  /** The anchor text is not in Overleaf's copy: offer to commit and push this file, then wait for Overleaf to have it. */
+  async function pushFile(doc: vscode.TextDocument, cwd: string) {
+    const file = vscode.workspace.asRelativePath(doc.uri, false);
+    const ok = await prompts.confirmPush(`"${file}" has changes Overleaf does not have yet, so the text you selected is not there. Commit this file and push it to Overleaf, then add the comment?${doc.isDirty ? ' (Unsaved changes will be saved first.)' : ''} Other pending commits on this branch are pushed too.`, 'Commit & push');
+    if (!ok) throw new Cancelled();
+    const msg = await prompts.commitMessage(`Update ${file}`);
+    if (!msg) throw new Cancelled();
+    if (doc.isDirty) await doc.save();
+    const git = (...args: string[]) => run('git', args, { cwd }).catch((e: { stderr?: string; message: string }) => { throw new Error(`git ${args[0]} failed: ${(e.stderr || e.message).trim()}`); });
+    await git('add', '--', file);
+    const staged = await run('git', ['diff', '--cached', '--quiet', '--', file], { cwd }).then(() => false, () => true);
+    if (staged) await git('commit', '-m', msg, '--', file);
+    await run('git', ['push'], { cwd }).catch(() => git('push', '-u', 'origin', 'HEAD')); // no upstream yet
+    output.appendLine(`pushed ${file}`);
+  }
+
   /** Run a write against Overleaf for the workspace's project, then re-fetch so the UI shows the server's state. */
   async function write<T>(what: string, fn: (c: NonNullable<typeof client>, projectId: string) => Promise<T>, hint = ''): Promise<T | undefined> {
     const folder = vscode.workspace.workspaceFolders?.[0];
@@ -211,6 +244,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       await refresh();
       return result;
     } catch (e) {
+      if (e instanceof Cancelled) return undefined;
       output.appendLine(`${what}: ${e}`);
       void vscode.window.showErrorMessage(`Overleaf Comments: ${what} failed: ${e instanceof Error ? e.message : e}${hint}`);
       return undefined;
@@ -252,7 +286,20 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }
     const filePath = vscode.workspace.asRelativePath(doc.uri, false);
     const hint = `\nAnchor text: "${selected.length > 60 ? selected.slice(0, 60) + '…' : selected}"${doc.isDirty ? ' (this file has unsaved changes; Overleaf only has the pushed version)' : ''}. If your local file differs from Overleaf, git pull/push first.`;
-    const added = await write('Add comment', (c, id) => c.addComment(id, { filePath, content: text, selectedText: selected, occurrence }), hint);
+    const args = { filePath, content: text, selectedText: selected, occurrence };
+    const added = await write('Add comment', async (c, id) => {
+      try {
+        return await c.addComment(id, args);
+      } catch (e) {
+        if (!notThere(e)) throw e;
+        const folder = vscode.workspace.workspaceFolders![0].uri.fsPath;
+        await pushFile(doc, folder);
+        // The git bridge can take a few seconds to show the push in Overleaf.
+        for (let i = 0; ; i++) {
+          try { return await c.addComment(id, args); } catch (e2) { if (!notThere(e2) || i >= 4) throw e2; await sleep(3000); }
+        }
+      }
+    }, hint);
     const landed = added && ctx.workspaceState.get<ProjectComment[]>(CACHE_KEY)?.find(c => c.threadId === added.threadId);
     if (added && landed && landed.selectedText !== selected) {
       void vscode.window.showWarningMessage(`Overleaf Comments: the comment attached to different text than selected ("${landed.selectedText.slice(0, 40)}"). Your local file may differ from Overleaf's copy; git pull and check.`);
@@ -306,12 +353,13 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     vscode.commands.registerCommand('overleafComments.treeReply', (n: Node) => { const e = threadOf(n); return e && promptReply(e); }),
     vscode.commands.registerCommand('overleafComments.treeResolve', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, true); }),
     vscode.commands.registerCommand('overleafComments.treeReopen', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, false); }),
+    vscode.commands.registerCommand('overleafComments.close', (t: vscode.CommentThread) => { t.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed; }),
     vscode.commands.registerCommand('overleafComments.lensShow', (id: string) => { const e = byId(id); return e && revealEntry(e); }),
     vscode.commands.registerCommand('overleafComments.lensReply', (id: string) => { const e = byId(id); return e && promptReply(e); }),
     vscode.commands.registerCommand('overleafComments.lensResolve', (id: string) => { const e = byId(id); return e && setResolved(e.thread, true); }),
     vscode.commands.registerCommand('overleafComments.lensReopen', (id: string) => { const e = byId(id); return e && setResolved(e.thread, false); }),
     vscode.commands.registerCommand('overleafComments.chooseMarkers', async () => {
-      const current = new Set(cfg().get<Marker[]>('markers') ?? ALL_MARKERS);
+      const current = new Set(cfg().get<Marker[]>('markers') ?? DEFAULT_MARKERS);
       const picked = await vscode.window.showQuickPick(ALL_MARKERS.map(m => ({ label: m, picked: current.has(m), description: MARKER_HELP[m] })), { canPickMany: true, title: 'Overleaf comment markers (the native icon is always shown)' });
       if (picked) await cfg().update('markers', picked.map(p => p.label), vscode.ConfigurationTarget.Global);
     }),
@@ -343,6 +391,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   void refresh(false).then(() => refresh());
   return {
     render,
+    setPrompts: p => { prompts = p; },
     useClient: c => { injected = c; },
     newThread: (uri, range) => controller.createCommentThread(uri, range, []),
     thread: i => threads[i].thread,

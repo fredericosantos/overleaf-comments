@@ -3,7 +3,9 @@
 import * as vscode from 'vscode';
 import type { ProjectComment, CommentMessage } from '@aloth/olcli';
 
-export const ALL_MARKERS = ['glyphMargin', 'inlineBefore', 'inlineAfter', 'lineTint', 'border', 'overviewRuler', 'codeLens', 'hover'] as const;
+export const ALL_MARKERS = ['glyphMargin', 'highlight', 'inlineBefore', 'inlineAfter', 'lineTint', 'border', 'overviewRuler', 'codeLens', 'hover'] as const;
+/** What most people want: the standard icon left of the numbers and a faint highlight; the rest is opt-in. */
+export const DEFAULT_MARKERS: Marker[] = ['glyphMargin', 'highlight'];
 export type Marker = (typeof ALL_MARKERS)[number];
 
 export interface MarkerEntry { thread: vscode.CommentThread; comment: ProjectComment }
@@ -20,11 +22,15 @@ export class Markers implements vscode.CodeLensProvider, vscode.Disposable {
   private readonly subs: vscode.Disposable[] = [];
 
   constructor(extensionUri: vscode.Uri, private readonly entries: () => MarkerEntry[], private readonly enabled: () => Marker[]) {
-    const glyph = (f: string) => ({ gutterIconPath: vscode.Uri.joinPath(extensionUri, 'media', f), gutterIconSize: 'contain' as const });
+    const icon = (f: string) => vscode.Uri.joinPath(extensionUri, 'media', f);
+    // The standard-looking comment icon, in theme-appropriate grey (open) or green with a check (resolved).
+    const glyph = (kind: 'open' | 'resolved') => ({ gutterIconSize: 'contain' as const, dark: { gutterIconPath: icon(`glyph-${kind}-dark.svg`) }, light: { gutterIconPath: icon(`glyph-${kind}-light.svg`) } });
     const ruler = (c: string) => ({ overviewRulerColor: c, overviewRulerLane: vscode.OverviewRulerLane.Right });
     this.types = {
-      glyphOpen: vscode.window.createTextEditorDecorationType(glyph('glyph-open.svg')),
-      glyphDone: vscode.window.createTextEditorDecorationType(glyph('glyph-resolved.svg')),
+      glyphOpen: vscode.window.createTextEditorDecorationType(glyph('open')),
+      glyphDone: vscode.window.createTextEditorDecorationType(glyph('resolved')),
+      highlightOpen: vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(245,166,35,0.16)', borderRadius: '2px' }),
+      highlightDone: vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(63,185,80,0.12)', borderRadius: '2px' }),
       before: vscode.window.createTextEditorDecorationType({}),
       after: vscode.window.createTextEditorDecorationType({}),
       tintOpen: vscode.window.createTextEditorDecorationType({ isWholeLine: true, backgroundColor: 'rgba(245,166,35,0.12)' }),
@@ -50,6 +56,9 @@ export class Markers implements vscode.CodeLensProvider, vscode.Disposable {
 
       set('glyphOpen', pick('glyphMargin', e => ({ range: lineOf(e) }), false));
       set('glyphDone', pick('glyphMargin', e => ({ range: lineOf(e) }), true));
+      // Faint background on exactly the commented text (a whole line only when the comment covers it).
+      set('highlightOpen', pick('highlight', e => ({ range: e.thread.range }), false));
+      set('highlightDone', pick('highlight', e => ({ range: e.thread.range }), true));
       set('before', pick('inlineBefore', e => ({ range: new vscode.Range(e.thread.range.start, e.thread.range.start), renderOptions: { before: { contentText: '💬 ' } } })));
       set('after', pick('inlineAfter', e => {
         const n = e.comment.messages.length;

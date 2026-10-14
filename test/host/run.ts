@@ -14,6 +14,16 @@ if (!live) {
   writeFileSync(join(ws, 'chap/f10.tex'), 'Line one\nThe quick brown fox.\nAlpha beta gamma delta.\nFinal.\n');
 }
 execFileSync('git', ['init', '-q'], { cwd: ws }); // activation event: workspaceContains:.git
+if (!live) {
+  // a local bare remote stands in for git.overleaf.com in the commit-and-push test
+  const remote = mkdtempSync(join(tmpdir(), 'olc-remote-'));
+  execFileSync('git', ['init', '--bare', '-q', remote]);
+  execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: ws });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: ws });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: ws });
+  process.env.OLC_TEST_REMOTE = remote;
+  process.env.OLC_TEST_WS = ws;
+}
 
 await runTests({
   vscodeExecutablePath: process.env.VSCODE_EXECUTABLE ?? '/Applications/Visual Studio Code.app/Contents/MacOS/Code',
