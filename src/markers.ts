@@ -3,6 +3,7 @@
 import * as vscode from 'vscode';
 import type { ProjectComment } from '@aloth/olcli';
 import { hoverContent, actionLinks, HOVER_COMMANDS } from './hover.ts';
+import { highlightShape } from './anchor.ts';
 
 export interface MarkerEntry { thread: vscode.CommentThread; comment: ProjectComment }
 
@@ -10,6 +11,8 @@ export class Highlights implements vscode.Disposable {
   private readonly open = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(245,166,35,0.16)', borderRadius: '2px' });
   private readonly done = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(63,185,80,0.12)', borderRadius: '2px' });
 
+  private readonly openLines = vscode.window.createTextEditorDecorationType({ isWholeLine: true, backgroundColor: 'rgba(245,166,35,0.16)' });
+  private readonly doneLines = vscode.window.createTextEditorDecorationType({ isWholeLine: true, backgroundColor: 'rgba(63,185,80,0.12)' });
   private readonly hover = vscode.window.createTextEditorDecorationType({});
 
   constructor(private readonly entries: () => MarkerEntry[]) {}
@@ -18,8 +21,23 @@ export class Highlights implements vscode.Disposable {
   apply(): void {
     for (const editor of vscode.window.visibleTextEditors) {
       const mine = this.entries().filter(e => e.thread.uri.toString() === editor.document.uri.toString());
-      editor.setDecorations(this.open, mine.filter(e => !e.comment.resolved).map(e => e.thread.range));
-      editor.setDecorations(this.done, mine.filter(e => e.comment.resolved).map(e => e.thread.range));
+      // One line: highlight exactly the commented text. Several lines: highlight the whole lines.
+      const split = (resolved: boolean) => {
+        const text: vscode.Range[] = [];
+        const lines: vscode.Range[] = [];
+        for (const e of mine.filter(x => x.comment.resolved === resolved)) {
+          const { start, end } = e.thread.range;
+          const shape = highlightShape(start, end);
+          (shape.kind === 'lines' ? lines : text).push(shape.kind === 'lines' ? new vscode.Range(start.line, 0, shape.lastLine, 0) : e.thread.range);
+        }
+        return { text, lines };
+      };
+      const open = split(false);
+      const done = split(true);
+      editor.setDecorations(this.open, open.text);
+      editor.setDecorations(this.openLines, open.lines);
+      editor.setDecorations(this.done, done.text);
+      editor.setDecorations(this.doneLines, done.lines);
       editor.setDecorations(this.hover, mine.map(e => ({ range: e.thread.range, hoverMessage: this.hoverText(e) })));
     }
   }
@@ -38,5 +56,5 @@ export class Highlights implements vscode.Disposable {
     return md;
   }
 
-  dispose(): void { this.open.dispose(); this.done.dispose(); this.hover.dispose(); }
+  dispose(): void { [this.open, this.done, this.openLines, this.doneLines, this.hover].forEach(d => d.dispose()); }
 }

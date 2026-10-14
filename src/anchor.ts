@@ -40,3 +40,14 @@ export function occurrenceAt(text: string, start: number, selected: string): num
     from = pos + selected.length;
   }
 }
+
+/**
+ * How to highlight a comment's range: just its text when it sits inside one line, whole lines when it spans
+ * several (or is only a line break, i.e. a comment on a blank line). `lastLine` ignores a range that ends at
+ * column 0 of the following line, which is how a trailing newline shows up.
+ */
+export function highlightShape(start: { line: number; character: number }, end: { line: number; character: number }): { kind: 'text' | 'lines'; lastLine: number } {
+  const lastLine = end.character === 0 && end.line > start.line ? end.line - 1 : end.line;
+  const blank = start.line === lastLine && end.line > start.line; // only a line break: nothing to underline, so mark the line
+  return { kind: lastLine > start.line || blank ? 'lines' : 'text', lastLine };
+}

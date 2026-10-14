@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { locate, occurrenceAt } from '../src/anchor.ts';
+import { locate, occurrenceAt, highlightShape } from '../src/anchor.ts';
 import { projectIdFromRemote } from '../src/project.ts';
 import { hoverContent, colorOf, actionLinks, MAX_CHARS, MAX_SHOWN } from '../src/hover.ts';
 
@@ -58,4 +58,13 @@ test('hover action links carry the thread id and swap Resolve/Reopen', () => {
   assert.match(open, /\[Resolve\]\(command:overleafComments\.hoverResolve\?/);
   assert.ok(!open.includes('Reopen'));
   assert.match(actionLinks({ ...base, resolved: true }), /\[Reopen\]\(command:overleafComments\.hoverReopen\?/);
+});
+
+test('highlightShape: text within a line, whole lines across lines or on a blank line', () => {
+  const p = (line: number, character: number) => ({ line, character });
+  assert.deepEqual(highlightShape(p(2, 4), p(2, 9)), { kind: 'text', lastLine: 2 });
+  assert.deepEqual(highlightShape(p(2, 0), p(4, 12)), { kind: 'lines', lastLine: 4 }); // three lines
+  assert.deepEqual(highlightShape(p(7, 3), p(8, 5)), { kind: 'lines', lastLine: 8 }); // two lines, partial first/last
+  assert.deepEqual(highlightShape(p(2, 0), p(4, 0)), { kind: 'lines', lastLine: 3 }); // ends at col 0 of next line = trailing newline
+  assert.deepEqual(highlightShape(p(5, 0), p(6, 0)), { kind: 'lines', lastLine: 5 }); // blank line comment (its line break)
 });
