@@ -1,0 +1,63 @@
+{
+  "name": "overleaf-comments",
+  "displayName": "Overleaf Comments",
+  "description": "Read Overleaf review comments inside VS Code for git-synced Overleaf projects.",
+  "version": "0.0.1",
+  "publisher": "fredericosantos",
+  "license": "MIT",
+  "private": true,
+  "repository": "github:fredericosantos/overleaf-comments",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:.git"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "overleafComments.setCookie",
+        "title": "Overleaf Comments: Set Session Cookie"
+      },
+      {
+        "command": "overleafComments.refresh",
+        "title": "Overleaf Comments: Refresh"
+      }
+    ],
+    "configuration": {
+      "title": "Overleaf Comments",
+      "properties": {
+        "overleafComments.projectId": {
+          "type": "string",
+          "default": "",
+          "description": "Overleaf project id. Empty = read it from the git remote (git.overleaf.com/<id>)."
+        },
+        "overleafComments.baseUrl": {
+          "type": "string",
+          "default": "https://www.overleaf.com",
+          "description": "Overleaf instance URL (self-hosted: your server)."
+        },
+        "overleafComments.showResolved": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also show resolved threads."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js --banner:js=\"const __importMetaUrl=require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@aloth/olcli": "file:vendor/olcli"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}
