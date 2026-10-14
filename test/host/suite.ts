@@ -86,8 +86,14 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('overleafComments.reply', { thread: fresh, text: 'note' });
   assert.deepEqual(calls.pop(), ['add', '0123456789abcdef01234567', { filePath: 'chap/f10.tex', content: 'note', selectedText: 'gamma delta', occurrence: 1 }]);
 
-  // empty selection: refused, nothing sent
+  // empty selection: anchors to the clicked line's text
   const empty = api.newThread(uri, new vscode.Range(doc.positionAt(g), doc.positionAt(g)));
-  await vscode.commands.executeCommand('overleafComments.reply', { thread: empty, text: 'nope' });
+  await vscode.commands.executeCommand('overleafComments.reply', { thread: empty, text: 'on the line' });
+  assert.deepEqual(calls.pop(), ['add', '0123456789abcdef01234567', { filePath: 'chap/f10.tex', content: 'on the line', selectedText: 'Alpha beta gamma delta.', occurrence: 1 }]);
+
+  // blank line: nothing to anchor to, nothing sent
+  const blank = doc.getText().length;
+  const nothing = api.newThread(uri, new vscode.Range(doc.positionAt(blank), doc.positionAt(blank)));
+  await vscode.commands.executeCommand('overleafComments.reply', { thread: nothing, text: 'nope' });
   assert.equal(calls.length, 0);
 }

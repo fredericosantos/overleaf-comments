@@ -186,7 +186,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   }
 
   /** Run a write against Overleaf for the workspace's project, then re-fetch so the UI shows the server's state. */
-  async function write<T>(what: string, fn: (c: NonNullable<typeof client>, projectId: string) => Promise<T>): Promise<T | undefined> {
+  async function write<T>(what: string, fn: (c: NonNullable<typeof client>, projectId: string) => Promise<T>, hint = ''): Promise<T | undefined> {
     const folder = vscode.workspace.workspaceFolders?.[0];
     try {
       if (!folder) throw new SetupError('Open the Overleaf project folder first.');
@@ -197,7 +197,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       return result;
     } catch (e) {
       output.appendLine(`${what}: ${e}`);
-      void vscode.window.showErrorMessage(`Overleaf Comments: ${what} failed: ${e instanceof Error ? e.message : e}`);
+      void vscode.window.showErrorMessage(`Overleaf Comments: ${what} failed: ${e instanceof Error ? e.message : e}${hint}`);
       return undefined;
     }
   }
@@ -212,18 +212,24 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       await write('Reply', (c, id) => c.postCommentMessage(id, known.comment.threadId, text));
       return;
     }
-    // New thread from the UI: anchor it to the selected text.
+    // New thread from the UI: anchor it to the selected text, or to the clicked line's text if nothing is selected.
     const doc = await vscode.workspace.openTextDocument(r.thread.uri);
-    const selected = doc.getText(r.thread.range);
-    const start = doc.offsetAt(r.thread.range.start);
+    let selected = doc.getText(r.thread.range);
+    let start = doc.offsetAt(r.thread.range.start);
+    if (!selected.trim()) {
+      const l = doc.lineAt(r.thread.range.start.line);
+      selected = l.text.trim();
+      start = doc.offsetAt(l.range.start) + l.firstNonWhitespaceCharacterIndex;
+    }
     const occurrence = occurrenceAt(doc.getText(), start, selected);
     r.thread.dispose();
-    if (!selected.trim() || occurrence === undefined) {
-      void vscode.window.showErrorMessage('Overleaf Comments: select the text to comment on first (a non-empty selection that does not overlap an identical earlier match).');
+    if (!selected || occurrence === undefined) {
+      void vscode.window.showErrorMessage('Overleaf Comments: nothing to anchor the comment to. Select some text (or click a non-empty line) and try again.');
       return;
     }
     const filePath = vscode.workspace.asRelativePath(doc.uri, false);
-    const added = await write('Add comment', (c, id) => c.addComment(id, { filePath, content: text, selectedText: selected, occurrence }));
+    const hint = `\nAnchor text: "${selected.length > 60 ? selected.slice(0, 60) + '…' : selected}"${doc.isDirty ? ' (this file has unsaved changes; Overleaf only has the pushed version)' : ''}. If your local file differs from Overleaf, git pull/push first.`;
+    const added = await write('Add comment', (c, id) => c.addComment(id, { filePath, content: text, selectedText: selected, occurrence }), hint);
     const landed = added && ctx.workspaceState.get<ProjectComment[]>(CACHE_KEY)?.find(c => c.threadId === added.threadId);
     if (added && landed && landed.selectedText !== selected) {
       void vscode.window.showWarningMessage(`Overleaf Comments: the comment attached to different text than selected ("${landed.selectedText.slice(0, 40)}"). Your local file may differ from Overleaf's copy; git pull and check.`);
