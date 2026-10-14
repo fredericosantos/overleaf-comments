@@ -58,11 +58,6 @@
         "title": "Show in editor"
       },
       {
-        "command": "overleafComments.close",
-        "title": "Close",
-        "icon": "$(close)"
-      },
-      {
         "command": "overleafComments.toggleMessage",
         "title": "Overleaf Comments: toggleMessage"
       },
@@ -129,10 +124,6 @@
           "when": "false"
         },
         {
-          "command": "overleafComments.close",
-          "when": "false"
-        },
-        {
           "command": "overleafComments.toggleMessage",
           "when": "false"
         },
@@ -161,11 +152,6 @@
           "command": "overleafComments.resolve",
           "group": "navigation",
           "when": "commentController == overleaf && commentThread =~ /^open/"
-        },
-        {
-          "command": "overleafComments.close",
-          "group": "navigation@9",
-          "when": "commentController == overleaf"
         },
         {
           "command": "overleafComments.showAll",
