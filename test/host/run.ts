@@ -13,22 +13,8 @@ if (!live) {
   mkdirSync(join(ws, 'chap'));
   writeFileSync(join(ws, 'chap/f10.tex'), 'Line one\nThe quick brown fox.\nAlpha beta gamma delta.\nFinal.\n');
 }
-execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: ws }); // activation event: workspaceContains:.git
-if (!live) {
-  // a local bare remote stands in for git.overleaf.com in the commit-and-push test
-  const remote = mkdtempSync(join(tmpdir(), 'olc-remote-'));
-  execFileSync('git', ['init', '--bare', '-q', '-b', 'main', remote]);
-  execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: ws });
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: ws });
-  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: ws });
-  // the push flow needs a branch with an upstream, like a real Overleaf clone
-  execFileSync('git', ['add', '-A'], { cwd: ws });
-  execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: ws });
-  execFileSync('git', ['push', '-q', '-u', 'origin', 'main'], { cwd: ws });
-  process.env.OLC_TEST_REMOTE = remote;
-  delete process.env.OVERLEAF_SESSION_COOKIE; // a cookie in the caller's shell must not leak into the "no cookie" step
-  process.env.OLC_TEST_WS = ws;
-}
+execFileSync('git', ['init', '-q'], { cwd: ws }); // activation event: workspaceContains:.git
+if (!live) delete process.env.OVERLEAF_SESSION_COOKIE; // a cookie in the caller's shell must not leak into the "no cookie" step
 
 await runTests({
   vscodeExecutablePath: process.env.VSCODE_EXECUTABLE ?? '/Applications/Visual Studio Code.app/Contents/MacOS/Code',

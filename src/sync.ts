@@ -8,6 +8,8 @@ import { CACHE_KEY, SetupError, setContext } from './common.ts';
 export class Sync implements vscode.Disposable {
   /** When the last fetch finished (0 = none yet); the focus refresh and its back-off look at it. */
   lastFetch = 0;
+  /** Called after every successful fetch has been rendered (the writes layer retries unsynced comments then). */
+  onFetched: (() => void) | undefined;
   readonly statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
   private syncedAt: number | undefined;
 
@@ -62,6 +64,7 @@ export class Sync implements vscode.Disposable {
       this.setStatus('synced');
       setContext('loadFailed', false);
       await threads.render();
+      this.onFetched?.();
     } catch (e) {
       session.dropClient(); // cookie may have expired; rebuild next time
       // Back off after real failures (e.g. Overleaf 429): the focus refresh waits refreshMinutes before retrying.

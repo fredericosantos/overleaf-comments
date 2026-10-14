@@ -2,20 +2,18 @@
 // Each is optimistic: the UI changes at once, and is rolled back (with the error shown) if Overleaf refuses.
 import * as vscode from 'vscode';
 import { anchorAt } from './anchor.ts';
-import { pushFile } from './git.ts';
 import { INTENT_TTL_MS, type Model } from './model.ts';
 import type { Session } from './session.ts';
 import type { Sync } from './sync.ts';
 import type { Threads } from './threads.ts';
-import { Cancelled, NOT_ON_OVERLEAF, PUSH_RETRIES, PUSH_WAIT_MS, RERENDER_SLACK_MS, SYNCING, type Client, type NewCommentArgs, type Prompts, type Reply, type Written } from './common.ts';
+import { Cancelled, NOT_ON_OVERLEAF, RERENDER_SLACK_MS, SYNCING, type Client, type NewCommentArgs, type Reply, type Written } from './common.ts';
 
 const optimistic = (text: string): vscode.Comment => ({ author: { name: 'You' }, body: new vscode.MarkdownString(text), mode: vscode.CommentMode.Preview, label: SYNCING });
 
 export class Writes implements vscode.Disposable {
-  prompts: Prompts = {
-    confirmPush: (m, ok) => vscode.window.showWarningMessage(m, { modal: true }, ok).then(r => r === ok),
-    commitMessage: d => vscode.window.showInputBox({ prompt: 'Commit message', value: d, ignoreFocusOut: true }),
-  };
+  /** New comments whose text is not in Overleaf's copy yet, shown in their thread as "Not synced" until it is. */
+  private readonly unsynced = new Map<vscode.CommentThread, { uri: vscode.Uri; args: NewCommentArgs }>();
+  private retrying = false;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
@@ -26,7 +24,9 @@ export class Writes implements vscode.Disposable {
     private readonly threads: Threads,
     private readonly sync: Sync,
     private readonly output: vscode.OutputChannel,
-  ) {}
+  ) {
+    sync.onFetched = () => void this.retryUnsynced();
+  }
 
   /** Resolves when every background send has finished (deactivate waits for it; so do the tests). */
   drain = async (): Promise<void> => {
@@ -123,21 +123,6 @@ export class Writes implements vscode.Disposable {
     }
   }
 
-  /** The text is not in Overleaf's copy: offer to commit and push this file, so Overleaf has it. */
-  private async pushForComment(doc: vscode.TextDocument, cwd: string): Promise<void> {
-    const file = vscode.workspace.asRelativePath(doc.uri, false);
-    const ok = await this.prompts.confirmPush(
-      `Overleaf's copy of "${file}" does not contain the text you selected. Commit this file and push it to Overleaf, then add the comment?${doc.isDirty ? ' (Unsaved changes will be saved first.)' : ''} Other pending commits on this branch are pushed too.`,
-      'Commit & push',
-    );
-    if (!ok) throw new Cancelled();
-    const message = await this.prompts.commitMessage(`Update ${file}`);
-    if (!message) throw new Cancelled();
-    if (doc.isDirty && !(await doc.save())) throw new Error(`Could not save ${file}.`);
-    await pushFile({ cwd, file, message });
-    this.output.appendLine(`pushed ${file}`);
-  }
-
   private async sendNew(uri: vscode.Uri, at: vscode.Range, args: NewCommentArgs): Promise<void> {
     const doc = await vscode.workspace.openTextDocument(uri);
     return this.addNew(doc, this.threads.controller.createCommentThread(uri, at, []), args);
@@ -151,19 +136,21 @@ export class Writes implements vscode.Disposable {
     temp.contextValue = 'syncing';
     temp.label = 'Adding comment…';
     temp.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-    const hint = `\nAnchor text: "${args.selectedText.length > 60 ? args.selectedText.slice(0, 60) + '…' : args.selectedText}"${doc.isDirty ? ' (this file has unsaved changes; Overleaf only has the pushed version)' : ''}. If your local file differs from Overleaf, git pull/push first.`;
-    const res = await this.write('Add comment', async (c, id, root) => {
+    let notOnOverleaf = false;
+    const res = await this.write('Add comment', async (c, id) => {
       try {
         return await c.addComment(id, args);
       } catch (e) {
         if (!NOT_ON_OVERLEAF.test(String(e))) throw e;
-        await this.pushForComment(doc, root.fsPath);
-        for (let i = 0; ; i++) {
-          try { return await c.addComment(id, args); } catch (e2) { if (!NOT_ON_OVERLEAF.test(String(e2)) || i >= PUSH_RETRIES) throw e2; await new Promise(r => setTimeout(r, PUSH_WAIT_MS)); }
-        }
+        notOnOverleaf = true; // not an error: the text just is not on Overleaf yet. Handled quietly below.
+        throw new Cancelled();
       }
-    }, hint);
+    });
     if (!res.ok) {
+      if (notOnOverleaf) {
+        this.markUnsynced(doc.uri, temp, args);
+        return;
+      }
       temp.dispose();
       if (!res.cancelled) this.offerFailed(args.content, () => this.sendNew(doc.uri, at, args));
       return;
@@ -180,6 +167,40 @@ export class Writes implements vscode.Disposable {
     const landed = this.model.view(Date.now()).find(c => c.threadId === res.value.threadId);
     if (landed && landed.selectedText !== args.selectedText) {
       void vscode.window.showWarningMessage(`Overleaf Comments: the comment attached to different text than selected ("${landed.selectedText.slice(0, 40)}"). Your local file may differ from Overleaf's copy; git pull and check.`);
+    }
+  }
+
+  /** The comment stays in its thread, quietly marked as not synced; no alarm, nothing is pushed for the user. */
+  private markUnsynced(uri: vscode.Uri, temp: vscode.CommentThread, args: NewCommentArgs): void {
+    temp.comments = [{ ...optimistic(args.content), label: 'Not synced' }];
+    temp.label = "Text not on Overleaf yet · it syncs once you've pushed it";
+    temp.contextValue = 'unsynced';
+    temp.canReply = false;
+    temp.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    this.unsynced.set(temp, { uri, args });
+  }
+
+  /** "Retry sync" (and the automatic retry): try once more to add the comment. */
+  retrySync(temp: vscode.CommentThread): Promise<void> {
+    const item = this.unsynced.get(temp);
+    if (!item) return Promise.resolve();
+    this.unsynced.delete(temp);
+    return this.track(Promise.resolve(vscode.workspace.openTextDocument(item.uri)).then(doc => this.addNew(doc, temp, item.args)));
+  }
+
+  /** "Discard": the user gives up on the comment. */
+  discardUnsynced(temp: vscode.CommentThread): void {
+    if (this.unsynced.delete(temp)) temp.dispose();
+  }
+
+  /** After each successful fetch (e.g. once the user has pushed): retry the unsynced comments, one at a time. */
+  private async retryUnsynced(): Promise<void> {
+    if (this.retrying || !this.unsynced.size) return;
+    this.retrying = true; // the retries fetch again themselves: do not start another round from inside this one
+    try {
+      for (const temp of [...this.unsynced.keys()]) await this.retrySync(temp);
+    } finally {
+      this.retrying = false;
     }
   }
 

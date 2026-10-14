@@ -8,9 +8,6 @@ export const SYNCING = 'Syncing…';
 export const ANCHOR_LOST = 'Anchor lost (text edited locally)';
 /** The message olcli's addComment throws when the text is not in Overleaf's copy of the file. */
 export const NOT_ON_OVERLEAF = /Selected text not found/;
-/** After a push, Overleaf's git bridge can take a few seconds to show the new text. */
-export const PUSH_RETRIES = 4;
-export const PUSH_WAIT_MS = 3000;
 export const RERENDER_SLACK_MS = 100;
 
 export type Client = Pick<OverleafClient, 'listComments' | 'addComment' | 'postCommentMessage' | 'resolveComment' | 'reopenComment'>;
@@ -21,18 +18,13 @@ export interface Entry { thread: vscode.CommentThread; comment: ProjectComment; 
 export type Written<T> = { ok: true; value: T } | { ok: false; cancelled?: boolean };
 export type NewCommentArgs = { filePath: string; content: string; selectedText: string; occurrence: number };
 
-export interface Prompts {
-  confirmPush(message: string, okLabel: string): Thenable<boolean>;
-  commitMessage(defaultMessage: string): Thenable<string | undefined>;
-}
-
 /** User-fixable setup problems (no cookie / no remote): reported, but not counted as a failed fetch. */
 export class SetupError extends Error {
   constructor(message: string, readonly needsCookie = false) {
     super(message);
   }
 }
-/** The user said no to a prompt: stop quietly, no error toast. */
+/** Stop quietly, no error toast (the caller already showed what it wants to show). */
 export class Cancelled extends Error {}
 
 export const cfg = () => vscode.workspace.getConfiguration('overleafComments');

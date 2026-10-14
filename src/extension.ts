@@ -8,9 +8,7 @@ import { Sync } from './sync.ts';
 import { Writes } from './writes.ts';
 import { CommentsTree, commentOf, firstText, type Node } from './tree.ts';
 import { focusReply, reveal } from './navigate.ts';
-import { CACHE_KEY, COOKIE_KEY, cfg, setContext, type Client, type Prompts, type Reply } from './common.ts';
-
-export type { Prompts };
+import { CACHE_KEY, COOKIE_KEY, cfg, setContext, type Client, type Reply } from './common.ts';
 
 /** Only handed out in extension-test mode; the shipped extension exposes nothing. */
 export interface ExtensionApi {
@@ -21,7 +19,6 @@ export interface ExtensionApi {
   storeCookie(value: string): Promise<void>;
   /** Resolves when every background send has finished. */
   idle(): Promise<void>;
-  setPrompts(p: Prompts): void;
   useClient(c: Client): void;
   /** A mouse click in the text, as the selection event would report it. */
   clickAt(uri: vscode.Uri, selection: vscode.Selection): void;
@@ -71,6 +68,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     command('reply', (r: Reply) => writes.onReply(r)),
     command('resolve', (t: vscode.CommentThread) => { const e = threads.entries.find(x => x.thread === t); return e && writes.track(writes.setResolved(e.comment.threadId, true)); }),
     command('toggleMessage', (threadId: string, messageId: string) => threads.toggleMessage(threadId, messageId)),
+    command('retrySync', (t: vscode.CommentThread) => writes.retrySync(t)),
+    command('discardUnsynced', (t: vscode.CommentThread) => writes.discardUnsynced(t)),
     command('showThread', (threadId: string) => threads.toggleAll(threadId)),
     command('showAll', (t: vscode.CommentThread) => threads.toggleAll(t)), // the header shows one or the other, depending on the thread's state
     command('collapseAll', (t: vscode.CommentThread) => threads.toggleAll(t)),
@@ -109,7 +108,6 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     },
     storeCookie: v => Promise.resolve(ctx.secrets.store(COOKIE_KEY, v)),
     idle: writes.drain,
-    setPrompts: p => { writes.prompts = p; },
     useClient: c => { session.injected = c; },
     clickAt: (uri, selection) => threads.collapseOutside(uri, selection),
     newThread: (uri, at) => threads.controller.createCommentThread(uri, at, []),
