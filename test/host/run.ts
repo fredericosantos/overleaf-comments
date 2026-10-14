@@ -20,5 +20,6 @@ await runTests({
   vscodeExecutablePath: process.env.VSCODE_EXECUTABLE ?? '/Applications/Visual Studio Code.app/Contents/MacOS/Code',
   extensionDevelopmentPath: root,
   extensionTestsPath: join(root, live ? 'dist/host-live.cjs' : 'dist/host-suite.cjs'),
-  launchArgs: [ws, '--disable-extensions', '--user-data-dir', mkdtempSync(join(tmpdir(), 'olc-ud-'))],
+  // Always pass --extensions-dir: a private --user-data-dir with the default extensions dir makes VS Code delete the user's real extensions.
+  launchArgs: [ws, '--disable-extensions', '--user-data-dir', mkdtempSync(join(tmpdir(), 'olc-ud-')), '--extensions-dir', mkdtempSync(join(tmpdir(), 'olc-ext-'))],
 });

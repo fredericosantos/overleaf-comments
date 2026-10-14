@@ -15,7 +15,8 @@ if (!existsSync(ws)) {
   execFileSync('git', ['init', '-q'], { cwd: ws });
   execFileSync('git', ['remote', 'add', 'origin', `https://git.overleaf.com/${projectId}`], { cwd: ws });
 }
-spawn('code', ['--new-window', '--disable-extensions', '--user-data-dir', `${root}/.test-profile`,
+// Always pass --extensions-dir: a private --user-data-dir with the default extensions dir makes VS Code delete the user's real extensions.
+spawn('code', ['--new-window', '--disable-extensions', '--user-data-dir', `${root}/.test-profile`, '--extensions-dir', `${root}/.test-profile/extensions`,
   `--extensionDevelopmentPath=${root}`, ws, `${ws}/chap/f1.tex`], {
   detached: true, stdio: 'ignore', env: { ...process.env, OVERLEAF_SESSION_COOKIE: getSessionCookie() },
 }).unref();
