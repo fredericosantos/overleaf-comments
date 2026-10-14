@@ -12,7 +12,8 @@ const run = promisify(execFile);
 export function activate(ctx: vscode.ExtensionContext) {
   const controller = vscode.comments.createCommentController('overleaf', 'Overleaf');
   const output = vscode.window.createOutputChannel('Overleaf Comments');
-  let threads: vscode.CommentThread[] = [];
+  // Each thread remembers its comment and last known offset so edits can re-anchor it.
+  let threads: { thread: vscode.CommentThread; comment: ProjectComment; pos: number }[] = [];
   let client: OverleafClient | undefined;
 
   const cfg = () => vscode.workspace.getConfiguration('overleafComments');
@@ -32,21 +33,32 @@ export function activate(ctx: vscode.ExtensionContext) {
     return client;
   }
 
-  function render(root: vscode.Uri, comments: ProjectComment[]) {
-    threads.forEach(t => t.dispose());
-    threads = [];
-    for (const c of comments) {
+  let renderGen = 0;
+  async function render(root: vscode.Uri, comments: ProjectComment[]) {
+    const gen = ++renderGen;
+    // Open docs first, then swap threads in one step; a newer render supersedes this one.
+    const docs = await Promise.all(comments.map(async c => {
       const uri = vscode.Uri.joinPath(root, c.path.replace(/^\/+/, ''));
-      // openTextDocument is cheap for already-open docs; unopened files are read from disk.
-      void vscode.workspace.openTextDocument(uri).then(doc => {
-        const a = locate(doc.getText(), c.position, c.selectedText);
-        const range = new vscode.Range(doc.positionAt(a.start), doc.positionAt(a.end));
-        const thread = controller.createCommentThread(uri, range, c.messages.map(m => toComment(m, a.found)));
-        thread.canReply = false;
-        thread.state = c.resolved ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
-        thread.label = a.found ? undefined : 'Anchor lost (text edited locally)';
-        threads.push(thread);
-      }, err => output.appendLine(`skip ${c.path}: ${err}`));
+      try {
+        return { c, uri, doc: await vscode.workspace.openTextDocument(uri) };
+      } catch (err) {
+        output.appendLine(`skip ${c.path}: ${err}`);
+        return undefined;
+      }
+    }));
+    if (gen !== renderGen) return;
+    threads.forEach(t => t.thread.dispose());
+    threads = [];
+    for (const d of docs) {
+      if (!d) continue;
+      const { c, uri, doc } = d;
+      const a = locate(doc.getText(), c.position, c.selectedText);
+      const range = new vscode.Range(doc.positionAt(a.start), doc.positionAt(a.end));
+      const thread = controller.createCommentThread(uri, range, c.messages.map(m => toComment(m, a.found)));
+      thread.canReply = false;
+      thread.state = c.resolved ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
+      thread.label = a.found ? undefined : 'Anchor lost (text edited locally)';
+      threads.push({ thread, comment: c, pos: a.start });
     }
   }
 
@@ -54,7 +66,7 @@ export function activate(ctx: vscode.ExtensionContext) {
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) return;
     const cached = ctx.workspaceState.get<ProjectComment[]>(CACHE_KEY);
-    if (cached) render(folder.uri, cached);
+    if (cached) await render(folder.uri, cached);
     if (!fetch) return;
     try {
       const id = await projectId(folder.uri.fsPath);
@@ -62,7 +74,7 @@ export function activate(ctx: vscode.ExtensionContext) {
       const status = cfg().get<boolean>('showResolved') ? 'all' : 'open';
       const comments = await (await getClient()).listComments(id, { status });
       await ctx.workspaceState.update(CACHE_KEY, comments);
-      render(folder.uri, comments);
+      await render(folder.uri, comments);
     } catch (e) {
       client = undefined; // cookie may have expired; rebuild next time
       output.appendLine(String(e));
@@ -73,13 +85,23 @@ export function activate(ctx: vscode.ExtensionContext) {
   ctx.subscriptions.push(
     controller,
     output,
+    vscode.workspace.onDidChangeTextDocument(e => {
+      const text = e.document.getText();
+      for (const t of threads) {
+        if (t.thread.uri.toString() !== e.document.uri.toString()) continue;
+        const a = locate(text, t.pos, t.comment.selectedText);
+        t.pos = a.start;
+        t.thread.range = new vscode.Range(e.document.positionAt(a.start), e.document.positionAt(a.end));
+        t.thread.label = a.found ? undefined : 'Anchor lost (text edited locally)';
+      }
+    }),
     vscode.commands.registerCommand('overleafComments.refresh', () =>
       vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Overleaf comments' }, () => refresh())),
     vscode.commands.registerCommand('overleafComments.clearCookie', async () => {
       await ctx.secrets.delete(COOKIE_KEY);
       await ctx.workspaceState.update(CACHE_KEY, undefined);
       client = undefined;
-      threads.forEach(t => t.dispose());
+      threads.forEach(t => t.thread.dispose());
       threads = [];
     }),
     vscode.commands.registerCommand('overleafComments.setCookie', async () => {
