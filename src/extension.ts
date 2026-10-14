@@ -29,6 +29,8 @@ export interface ExtensionApi {
   seedCacheAndRefresh(comments: ProjectComment[], fetch: boolean): Promise<void>;
   /** Test seam: store a cookie as the Set Session Cookie command would. */
   storeCookie(value: string): Promise<void>;
+  /** Test seam: resolves when every background send has finished. */
+  idle(): Promise<void>;
   /** Test seam: replace the confirmation/commit-message prompts of the commit-and-push flow. */
   setPrompts(p: Prompts): void;
   /** Test seam: replace the Overleaf client (no network). */
@@ -240,7 +242,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   }
 
   /** Run a write against Overleaf for the workspace's project, then re-fetch so the UI shows the server's state. */
-  type Written<T> = { ok: true; value: T } | { ok: false };
+  type Written<T> = { ok: true; value: T } | { ok: false; cancelled?: boolean };
   async function write<T>(what: string, fn: (c: NonNullable<typeof client>, projectId: string) => Promise<T>, hint = ''): Promise<Written<T>> {
     const folder = vscode.workspace.workspaceFolders?.[0];
     try {
@@ -252,16 +254,27 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       await refresh(true, false);
       return { ok: true, value };
     } catch (e) {
-      if (e instanceof Cancelled) return { ok: false };
+      if (e instanceof Cancelled) return { ok: false, cancelled: true };
       output.appendLine(`${what}: ${e}`);
       void vscode.window.showErrorMessage(`Overleaf Comments: ${what} failed: ${e instanceof Error ? e.message : e}${hint}`);
       return { ok: false };
     }
   }
 
-  /** A failed write must not lose a long comment: offer to copy it. */
-  function offerCopy(text: string) {
-    void vscode.window.showInformationMessage('Your comment was not sent.', 'Copy text').then(c => c && vscode.env.clipboard.writeText(text));
+  /** A failed send must not lose a long comment: the reply box cannot be refilled, so offer Retry and Copy. */
+  function offerFailed(text: string, retry: () => Promise<void>) {
+    void vscode.window.showInformationMessage('Your comment was not sent.', 'Retry', 'Copy text').then(choice => {
+      if (choice === 'Retry') track(retry());
+      else if (choice === 'Copy text') void vscode.env.clipboard.writeText(text);
+    });
+  }
+
+  // The reply command returns at once (VS Code clears the reply box only when it returns); the work runs here.
+  const pending = new Set<Promise<unknown>>();
+  function track<T>(p: Promise<T>): Promise<T> {
+    pending.add(p);
+    void p.finally(() => pending.delete(p));
+    return p;
   }
 
   const SYNCING = 'Syncing…';
@@ -277,7 +290,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       const res = await write('Reply', (c, id) => c.postCommentMessage(id, known.comment.threadId, text));
       if (!res.ok) {
         r.thread.comments = before;
-        offerCopy(text);
+        if (!res.cancelled) offerFailed(text, () => replyOrCreate({ thread: r.thread, text } as vscode.CommentReply));
       } else {
         // If the server list did not include it yet, keep the text but drop the "Syncing…" label.
         const last = r.thread.comments.at(-1);
@@ -304,6 +317,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     }
     const occurrence = occurrenceAt(doc.getText(), start, selected);
     const temp = r.thread;
+    const tempUri = temp.uri;
+    const tempRange = temp.range;
     if (!selected || occurrence === undefined) {
       temp.dispose();
       void vscode.window.showErrorMessage('Overleaf Comments: nothing to anchor the comment to. Select some text (or click a non-empty line) and try again.');
@@ -331,7 +346,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       }
     }, hint);
     temp.dispose(); // the real thread was created by write()'s refresh, so the swap is seamless
-    if (!res.ok) offerCopy(text);
+    if (!res.ok && !res.cancelled) offerFailed(text, () => replyOrCreate({ thread: controller.createCommentThread(tempUri, tempRange, []), text } as vscode.CommentReply));
     const added = res.ok ? res.value : undefined;
     const landed = added && ctx.workspaceState.get<ProjectComment[]>(CACHE_KEY)?.find(c => c.threadId === added.threadId);
     if (added && landed && landed.selectedText !== selected) {
@@ -411,7 +426,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       }
       treeChanged.fire();
     }),
-    vscode.commands.registerCommand('overleafComments.reply', replyOrCreate),
+    vscode.commands.registerCommand('overleafComments.reply', (r: vscode.CommentReply) => { track(replyOrCreate(r)); }),
     vscode.commands.registerCommand('overleafComments.resolve', (t: vscode.CommentThread) => resolveThread(t)),
     vscode.commands.registerCommand('overleafComments.treeReveal', (n: Node) => { const c = commentOf(n); if (!c) return; const e = byId(c.threadId); return e ? revealEntry(e) : revealResolved(c); }),
     vscode.commands.registerCommand('overleafComments.treeReply', (n: Node) => { const c = commentOf(n); const e = c && byId(c.threadId); return e && focusReply(e); }),
@@ -449,6 +464,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   void refresh(false).then(() => refresh());
   return {
     render,
+    idle: async () => { while (pending.size) await Promise.allSettled([...pending]); },
     setPrompts: p => { prompts = p; },
     useClient: c => { injected = c; },
     newThread: (uri, range) => controller.createCommentThread(uri, range, []),
