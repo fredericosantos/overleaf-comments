@@ -132,3 +132,16 @@ export function anchorAt(text: string, startOffset: number, endOffset: number): 
   const occurrence = occurrenceAt(lf, at, selected);
   return occurrence === undefined ? undefined : { selectedText: selected, occurrence };
 }
+
+/**
+ * Where a comment's anchor is after the document changed (typing, or a `git pull` reloading the file).
+ * Move it through the edits; if an edit touched its text, find the text again, nearest to where it was.
+ * `found: false` = the commented text no longer exists in the file (the caller labels the thread "Anchor lost").
+ */
+export function reanchor(text: string, start: number, end: number, selectedText: string, changes: TextChange[]): { start: number; end: number; found: boolean } {
+  const v = lfView(text);
+  const moved = shiftAnchor(start, end, changes);
+  if (v.lf.slice(v.fromDoc(moved.start), v.fromDoc(moved.end)) === selectedText) return { start: moved.start, end: moved.end, found: true };
+  const a = locate(v.lf, v.fromDoc(moved.start), selectedText);
+  return { start: v.toDoc(a.start), end: v.toDoc(a.end), found: a.found };
+}

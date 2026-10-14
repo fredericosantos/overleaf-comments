@@ -33,7 +33,7 @@ For scripted or throwaway launches you can instead start VS Code with `OVERLEAF_
 
 If you see "No session cookie", this VS Code profile has no cookie yet: run **Overleaf Comments: Set Session Cookie** once (the cookie is stored per VS Code profile).
 
-Anchors are matched by the commented text, nearest to Overleaf's offset, and followed through your edits; if you edit inside the commented text and it can no longer be found, the thread is labelled "Anchor lost" at its last position.
+Anchors are matched by the commented text, nearest to Overleaf's offset, and followed through your edits and through `git pull` (VS Code reloads a pulled file as one edit from the first to the last changed line; the comment moves with its text, and is marked lost only if the pull rewrites the commented text itself); if you edit inside the commented text and it can no longer be found, the thread is labelled "Anchor lost" at its last position.
 
 Install a built package with `code --install-extension overleaf-comments.vsix`
 (`npx @vscode/vsce package --no-dependencies -o overleaf-comments.vsix` after building).

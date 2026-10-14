@@ -2,7 +2,7 @@
 // refreshes, re-anchored as the file is edited, with the highlight on top.
 import * as vscode from 'vscode';
 import type { ProjectComment, CommentMessage } from '@aloth/olcli';
-import { locate, lfView, shiftAnchor } from './anchor.ts';
+import { locate, lfView, reanchor } from './anchor.ts';
 import { authorOf, clipForThread, messageHeight, visibleIndices } from './text.ts';
 import { Highlights } from './markers.ts';
 import type { Model } from './model.ts';
@@ -208,17 +208,9 @@ export class Threads implements vscode.Disposable {
     const mine = this.entries.filter(x => x.thread.uri.toString() === uri);
     if (!mine.length || !e.contentChanges.length) return;
     const changes = e.contentChanges.map(c => ({ offset: c.rangeOffset, length: c.rangeLength, text: c.text }));
-    const v = lfView(e.document.getText());
+    const text = e.document.getText();
     for (const x of mine) {
-      let { start, end } = shiftAnchor(x.start, x.end, changes);
-      let found = true;
-      if (v.lf.slice(v.fromDoc(start), v.fromDoc(end)) !== x.comment.selectedText) {
-        // The edit touched the anchor's text: look for it again, nearest to where it was.
-        const a = locate(v.lf, v.fromDoc(start), x.comment.selectedText);
-        found = a.found;
-        start = v.toDoc(a.start);
-        end = v.toDoc(a.end);
-      }
+      const { start, end, found } = reanchor(text, x.start, x.end, x.comment.selectedText, changes);
       x.start = start;
       x.end = end;
       x.thread.range = range(e.document, start, end);

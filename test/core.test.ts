@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { locate, occurrenceAt, highlightShape, lfView, shiftAnchor, anchorAt } from '../src/anchor.ts';
+import { locate, occurrenceAt, highlightShape, lfView, shiftAnchor, anchorAt, reanchor, type TextChange } from '../src/anchor.ts';
 import { projectIdFromRemote } from '../src/project.ts';
 import { authorOf, clipForThread, visibleIndices, messageHeight, THREAD_MAX_LINES, COLLAPSE_LINES, COLLAPSE_CHARS } from '../src/text.ts';
 
@@ -173,4 +173,62 @@ test('authorOf: name, else first+last, else email, else unknown; tolerates a mis
   assert.equal(authorOf({ id: '1', content: '', user: { name: 'Ada' } }), 'Ada');
   assert.equal(authorOf({ id: '1', content: '', user: { first_name: 'Ada', last_name: 'L' } }), 'Ada L');
   assert.equal(authorOf({ id: '1', content: '', user: { email: 'a@b.c' } }), 'a@b.c');
+});
+
+/** What VS Code does when a file changes on disk (a `git pull`): ONE edit from the first changed line to the last. */
+function reloadEdit(before: string, after: string): TextChange {
+  const a = before.split('\n');
+  const b = after.split('\n');
+  let pre = 0;
+  while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
+  let suf = 0;
+  while (suf < a.length - pre && suf < b.length - pre && a[a.length - 1 - suf] === b[b.length - 1 - suf]) suf++;
+  const offset = a.slice(0, pre).join('\n').length + (pre ? 1 : 0);
+  const removed = a.slice(pre, a.length - suf).join('\n');
+  const inserted = b.slice(pre, b.length - suf).join('\n');
+  return { offset, length: removed.length, text: inserted };
+}
+
+/** Where does a comment anchored on `needle` end up after `before` becomes `after` (as a pull would reload it)? */
+function afterPull(before: string, after: string, needle: string, nth = 0) {
+  let start = -1;
+  for (let i = 0; i <= nth; i++) start = before.indexOf(needle, start + 1);
+  const r = reanchor(after, start, start + needle.length, needle, [reloadEdit(before, after)]);
+  return { ...r, line: after.slice(0, r.start).split('\n').length, text: after.slice(r.start, r.end) };
+}
+
+test('a pull that adds lines ABOVE the commented text: the comment moves down with it', () => {
+  const before = 'intro\nThe quick brown fox.\nFinal.\n';
+  const after = 'intro\nnew line from a collaborator\nanother new line\nThe quick brown fox.\nFinal.\n';
+  const r = afterPull(before, after, 'quick brown');
+  assert.deepEqual([r.found, r.text, r.line], [true, 'quick brown', 4]);
+});
+
+test('a pull that changes lines AROUND the commented text (one big reload edit covering it): still found', () => {
+  const before = 'one\ntwo\nThe quick brown fox.\nfour\nfive\n';
+  const after = 'ONE\nTWO\nThe quick brown fox.\nFOUR\nFIVE\n'; // first and last lines changed: the edit spans the commented line
+  const r = afterPull(before, after, 'quick brown');
+  assert.deepEqual([r.found, r.text, r.line], [true, 'quick brown', 3]);
+});
+
+test('a pull that rewrites the commented text itself: the comment is marked lost, not moved to a wrong place', () => {
+  const before = 'one\nThe quick brown fox.\nthree\n';
+  const after = 'one\nThe slow green fox.\nthree\n';
+  const r = afterPull(before, after, 'quick brown');
+  assert.equal(r.found, false); // thread label: "Anchor lost"
+});
+
+test('a pull that moves the commented text far away: it follows, when the text is unique', () => {
+  const before = 'The quick brown fox.\n' + 'filler\n'.repeat(20) + 'end\n';
+  const after = 'filler\n'.repeat(20) + 'The quick brown fox.\nend\n';
+  const r = afterPull(before, after, 'quick brown');
+  assert.deepEqual([r.found, r.text, r.line], [true, 'quick brown', 21]);
+});
+
+test('KNOWN LIMIT: repeated text + a pull that rewrites the commented copy: it may jump to another copy', () => {
+  const before = 'say hello\nsay hello\nsay hello\n';
+  const after = 'say hello\nsay HELLO\nsay hello\n'; // the 2nd (commented) copy was rewritten by the pull
+  const r = afterPull(before, after, 'hello', 1); // comment was on the 2nd "hello"
+  assert.equal(r.found, true); // nearest remaining copy: the comment now sits on a DIFFERENT line than before
+  assert.notEqual(r.line, 2);
 });
