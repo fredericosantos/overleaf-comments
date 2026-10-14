@@ -21,6 +21,12 @@ Comments are cached in VS Code workspace storage (outside the repo), never commi
 
 Comment widgets always open below their line; VS Code has no setting for placing them above, and no extension API to focus a thread's reply box (the sidebar's Reply is best effort).
 
+## Requirements
+
+- **Nothing else to install.** The Overleaf client (olcli) is bundled inside the extension; you do not need the `olcli` command.
+- **A git clone of your Overleaf project**, with Overleaf as its remote (`https://git.overleaf.com/<project id>`). Overleaf's git integration is only available on some plans; check that yours includes it.
+- **Your Overleaf session cookie** (see below). It stays in VS Code's secret storage, on your machine.
+
 ## Use
 
 1. Open the git clone of your Overleaf project (remote `https://git.overleaf.com/<project id>`).
