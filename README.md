@@ -6,6 +6,8 @@ Overleaf's UI, so this fetches them live and renders them with VS Code's native 
 
 Comments are cached in VS Code workspace storage (outside the repo), never committed.
 
+> Not affiliated with, endorsed by or sponsored by Overleaf. "Overleaf" is a trademark of its owner; it is used here only to say which service this works with.
+
 ## What you can do
 
 - **Read:** open comments are drawn in the text as a faint highlight (exactly the commented text, or whole lines when the comment spans several lines) with VS Code's native comment icon, which sits on the last line of a multi-line comment, where the thread opens.
@@ -52,3 +54,7 @@ code --extensionDevelopmentPath=$PWD <your-overleaf-clone>
 
 Built on a fork of [olcli](https://github.com/aloth/olcli) (`vendor/olcli`) whose comment listing is
 about 2.5x faster (parallel sockets); the upstream PR is tracked in issue #1.
+
+## License and credits
+
+MIT (see `LICENSE`). The icon is built from [Lucide](https://lucide.dev) icons (ISC). The extension bundles [olcli](https://github.com/aloth/olcli) (MIT) and its dependencies; see `THIRD_PARTY_NOTICES.md`.

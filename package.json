@@ -1,12 +1,14 @@
 {
   "name": "overleaf-comments",
   "displayName": "Overleaf Comments",
-  "description": "Read Overleaf review comments inside VS Code for git-synced Overleaf projects.",
-  "version": "0.0.1",
+  "description": "Read, reply to and resolve Overleaf review comments inside VS Code, for projects you sync with Overleaf's git bridge. Not affiliated with Overleaf.",
+  "version": "0.1.0",
   "publisher": "fredericosantos",
   "license": "MIT",
-  "private": true,
-  "repository": "github:fredericosantos/overleaf-comments",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fredericosantos/overleaf-comments.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -274,5 +276,27 @@
     "@vscode/test-electron": "^3.1.0",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
+  },
+  "preview": true,
+  "icon": "media/icon.png",
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "overleaf",
+    "latex",
+    "tex",
+    "comments",
+    "review",
+    "git",
+    "collaboration"
+  ],
+  "galleryBanner": {
+    "color": "#1B6B34",
+    "theme": "dark"
+  },
+  "homepage": "https://github.com/fredericosantos/overleaf-comments#readme",
+  "bugs": {
+    "url": "https://github.com/fredericosantos/overleaf-comments/issues"
   }
 }

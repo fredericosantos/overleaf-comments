@@ -6,3 +6,4 @@ dist/
 .claude/scheduled_tasks.lock
 .test-ws/
 .test-profile/
+media/icon-options/
