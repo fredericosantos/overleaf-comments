@@ -17,7 +17,9 @@ const signature = (c: ProjectComment) => c.messages.map(m => `${m.id}\u0000${m.c
 
 export class Threads implements vscode.Disposable {
   readonly controller = vscode.comments.createCommentController('overleaf', 'Overleaf');
-  readonly highlights = new Highlights(() => this.entries);
+  /** Not-synced comments (their placeholder thread): drawn differently, and followed through edits like synced ones. */
+  private readonly unsynced = new Map<vscode.CommentThread, { selectedText: string; start: number; end: number }>();
+  readonly highlights: Highlights;
   entries: Entry[] = [];
   /** Optimistic replies not yet confirmed, per thread: renders keep showing them until the server's list has the same text. */
   readonly pendingReplies = new Map<string, { opt: vscode.Comment; text: string }[]>();
@@ -31,7 +33,8 @@ export class Threads implements vscode.Disposable {
   private warnedMissing = '';
 
   /** `onChange`: called whenever the set or position of threads changed (the sidebar redraws). */
-  constructor(private readonly model: Model, private readonly output: vscode.OutputChannel, session: Session, private readonly onChange: () => void) {
+  constructor(private readonly model: Model, private readonly output: vscode.OutputChannel, session: Session, extensionUri: vscode.Uri, private readonly onChange: () => void) {
+    this.highlights = new Highlights(() => this.entries, () => [...this.unsynced.keys()], extensionUri);
     this.controller.commentingRangeProvider = {
       provideCommentingRanges: doc => (session.isOverleaf !== false && doc.uri.scheme === 'file' && /\.tex$/i.test(doc.uri.fsPath) && doc.lineCount ? [new vscode.Range(0, 0, doc.lineCount - 1, 0)] : []),
     };
@@ -107,6 +110,18 @@ export class Threads implements vscode.Disposable {
   redraw(uri?: vscode.Uri): void {
     for (const e of this.entries) if (!uri || e.thread.uri.toString() === uri.toString()) e.thread.range = new vscode.Range(e.thread.range.start, e.thread.range.end);
   }
+
+  /** Start drawing `thread` as a not-synced comment on `selectedText`. */
+  addUnsynced(thread: vscode.CommentThread, doc: vscode.TextDocument, selectedText: string): void {
+    this.unsynced.set(thread, { selectedText, start: doc.offsetAt(thread.range.start), end: doc.offsetAt(thread.range.end) });
+    this.highlights.apply();
+  }
+
+  removeUnsynced(thread: vscode.CommentThread): void {
+    if (this.unsynced.delete(thread)) this.highlights.apply();
+  }
+
+  unsyncedCount = () => this.unsynced.size;
 
   /** Keep a placeholder alive until a render shows the real thread for `threadId`. */
   linger(threadId: string, temp: vscode.CommentThread): void {
@@ -196,6 +211,7 @@ export class Threads implements vscode.Disposable {
     this.entries = [];
     this.lingering.forEach(temp => temp.dispose());
     this.lingering.clear();
+    this.unsynced.clear();
     this.pendingReplies.clear();
     this.warnedMissing = '';
     this.highlights.apply();
@@ -206,7 +222,8 @@ export class Threads implements vscode.Disposable {
   onTextChange(e: vscode.TextDocumentChangeEvent): void {
     const uri = e.document.uri.toString();
     const mine = this.entries.filter(x => x.thread.uri.toString() === uri);
-    if (!mine.length || !e.contentChanges.length) return;
+    const waiting = [...this.unsynced].filter(([th]) => th.uri.toString() === uri);
+    if ((!mine.length && !waiting.length) || !e.contentChanges.length) return;
     const changes = e.contentChanges.map(c => ({ offset: c.rangeOffset, length: c.rangeLength, text: c.text }));
     const text = e.document.getText();
     for (const x of mine) {
@@ -215,6 +232,12 @@ export class Threads implements vscode.Disposable {
       x.end = end;
       x.thread.range = range(e.document, start, end);
       x.thread.label = found ? undefined : ANCHOR_LOST;
+    }
+    for (const [th, p] of waiting) {
+      const r = reanchor(text, p.start, p.end, p.selectedText, changes);
+      p.start = r.start;
+      p.end = r.end;
+      th.range = range(e.document, r.start, r.end);
     }
     this.highlights.apply();
     this.onChange();

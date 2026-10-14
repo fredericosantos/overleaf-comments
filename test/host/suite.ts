@@ -260,6 +260,7 @@ export async function run(): Promise<void> {
   assert.equal(pending.contextValue, 'unsynced', 'the thread offers Retry sync / Discard');
   assert.match(pending.label ?? '', /Not on Overleaf yet|not on Overleaf yet/i, 'quietly labelled, not an error');
   assert.equal(pending.comments.at(-1)?.label, 'Not synced');
+  assert.equal(api.unsynced(), 1, 'drawn as not synced (blue), tracked so it follows edits');
   assert.equal((pending.comments.at(-1)?.body as vscode.MarkdownString).value, 'waiting for the push', 'the text is kept');
 
   await vscode.commands.executeCommand('overleafComments.retrySync', pending); // attempt 2: still not there
@@ -269,6 +270,7 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('overleafComments.retrySync', pending); // attempt 3: Overleaf has the text now
   await api.idle();
   assert.equal(calls.length, 1, 'added once the text is on Overleaf');
+  assert.equal(api.unsynced(), 0, 'no longer drawn as not synced');
   assert.deepEqual(calls[0].slice(0, 1), ['add']);
 
   const gone = api.newThread(uri, new vscode.Range(doc.positionAt(at2), doc.positionAt(at2 + 5)));
@@ -276,7 +278,9 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('overleafComments.reply', { thread: gone, text: 'never mind' });
   await api.idle();
   assert.equal(gone.contextValue, 'unsynced');
+  assert.equal(api.unsynced(), 1);
   await vscode.commands.executeCommand('overleafComments.discardUnsynced', gone);
+  assert.equal(api.unsynced(), 0, 'discarded: nothing drawn any more');
   await vscode.commands.executeCommand('overleafComments.retrySync', gone); // a discarded thread is forgotten: nothing happens
   await api.idle();
   assert.equal(calls.length, 1);

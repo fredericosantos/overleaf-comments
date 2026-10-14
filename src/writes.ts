@@ -148,7 +148,7 @@ export class Writes implements vscode.Disposable {
     });
     if (!res.ok) {
       if (notOnOverleaf) {
-        this.markUnsynced(doc.uri, temp, args);
+        this.markUnsynced(doc, temp, args);
         return;
       }
       temp.dispose();
@@ -171,13 +171,14 @@ export class Writes implements vscode.Disposable {
   }
 
   /** The comment stays in its thread, quietly marked as not synced; no alarm, nothing is pushed for the user. */
-  private markUnsynced(uri: vscode.Uri, temp: vscode.CommentThread, args: NewCommentArgs): void {
+  private markUnsynced(doc: vscode.TextDocument, temp: vscode.CommentThread, args: NewCommentArgs): void {
     temp.comments = [{ ...optimistic(args.content), label: 'Not synced' }];
     temp.label = "Text not on Overleaf yet · it syncs once you've pushed it";
     temp.contextValue = 'unsynced';
     temp.canReply = false;
     temp.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
-    this.unsynced.set(temp, { uri, args });
+    this.unsynced.set(temp, { uri: doc.uri, args });
+    this.threads.addUnsynced(temp, doc, args.selectedText);
   }
 
   /** "Retry sync" (and the automatic retry): try once more to add the comment. */
@@ -185,12 +186,16 @@ export class Writes implements vscode.Disposable {
     const item = this.unsynced.get(temp);
     if (!item) return Promise.resolve();
     this.unsynced.delete(temp);
+    this.threads.removeUnsynced(temp);
     return this.track(Promise.resolve(vscode.workspace.openTextDocument(item.uri)).then(doc => this.addNew(doc, temp, item.args)));
   }
 
   /** "Discard": the user gives up on the comment. */
   discardUnsynced(temp: vscode.CommentThread): void {
-    if (this.unsynced.delete(temp)) temp.dispose();
+    if (this.unsynced.delete(temp)) {
+      this.threads.removeUnsynced(temp);
+      temp.dispose();
+    }
   }
 
   /** After each successful fetch (e.g. once the user has pushed): retry the unsynced comments, one at a time. */

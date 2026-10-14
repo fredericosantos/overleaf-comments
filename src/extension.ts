@@ -28,6 +28,8 @@ export interface ExtensionApi {
   /** What the sidebar shows (file -> thread titles, resolved ones prefixed). */
   tree(): { file: string; threads: string[] }[];
   status(): string;
+  /** How many comments are currently drawn as not synced. */
+  unsynced(): number;
   threads(): { uri: string; threadId: string; line: number; label?: string; messages: number }[];
 }
 
@@ -39,7 +41,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
   const session = new Session(ctx);
   // threads <-> tree: the tree reads the model and asks threads where an open comment currently is.
   let tree: CommentsTree;
-  const threads = new Threads(model, output, session, () => tree.refresh());
+  const threads = new Threads(model, output, session, ctx.extensionUri, () => tree.refresh());
   tree = new CommentsTree(() => model.view(Date.now()), id => threads.byId(id)?.thread.range.start.line);
   const treeView = vscode.window.createTreeView('overleafComments.threads', { treeDataProvider: tree });
   const sync = new Sync(ctx, session, model, threads, output);
@@ -114,6 +116,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     thread: i => threads.entries[i].thread,
     tree: () => tree.getChildren().map(f => (f.kind === 'file' ? { file: f.path, threads: f.comments.map(c => `${c.resolved ? '[resolved] ' : ''}${firstText(c)}`) } : { file: '', threads: [] })),
     status: () => sync.statusItem.text,
+    unsynced: () => threads.unsyncedCount(),
     threads: () => threads.entries.map(e => ({ uri: e.thread.uri.toString(), threadId: e.comment.threadId, line: e.thread.range.start.line, label: e.thread.label, messages: e.thread.comments.length })),
   };
 }
