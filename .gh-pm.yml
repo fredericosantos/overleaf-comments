@@ -95,3 +95,15 @@ metadata:
         - name: Closed
           id: PVTF_lAHOABEWL84BnAX-zhlm9mg
           data_type: CLOSED
+        - name: Priority
+          id: PVTSSF_lAHOABEWL84BnAX-zhlrTNE
+          data_type: SINGLE_SELECT
+          options:
+            - name: Critical
+              id: c738c76e
+            - name: High
+              id: 78893b73
+            - name: Medium
+              id: 3879ecad
+            - name: Low
+              id: e008b23e
