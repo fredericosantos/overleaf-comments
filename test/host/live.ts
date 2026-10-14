@@ -38,7 +38,7 @@ export async function run(): Promise<void> {
     const replied = (await real.listComments(id, { status: 'all' })).find(c => c.threadId === threadId)!;
     assert.deepEqual(replied.messages.map(m => m.content), [marker, `${marker} reply`]);
 
-    // 3. resolve it: the server must show it resolved (poll: Overleaf may lag), then it must leave the open list
+    // 3. resolve it: the server must show it resolved (poll: Overleaf may lag); it stays visible, as resolved
     await vscode.commands.executeCommand('overleafComments.resolve', api.thread(api.threads().findIndex(x => x.threadId === threadId)));
     let serverResolved = false;
     for (let i = 0; i < 6 && !serverResolved; i++) {
@@ -46,7 +46,7 @@ export async function run(): Promise<void> {
       if (!serverResolved) await new Promise(r => setTimeout(r, 2000));
     }
     assert.equal(serverResolved, true, 'server does not show it resolved');
-    assert.equal(api.threads().some(x => x.threadId === threadId), false, 'resolved thread should leave the open list');
+    assert.equal(api.threads().find(x => x.threadId === threadId)?.resolved, true, 'resolved thread should stay visible, marked resolved');
   } finally {
     if (threadId) await real.deleteComment(id, threadId); // leave the scratch project as we found it
   }

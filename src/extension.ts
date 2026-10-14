@@ -20,7 +20,6 @@ class Cancelled extends Error {}
 export interface Prompts {
   confirmPush(message: string, okLabel: string): Thenable<boolean>;
   commitMessage(defaultMessage: string): Thenable<string | undefined>;
-  replyText(): Thenable<string | undefined>;
 }
 
 export interface ExtensionApi {
@@ -146,20 +145,32 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     if (gen !== renderGen) return;
     const skipped = docs.filter(d => !d).length;
     if (skipped) void vscode.window.showWarningMessage(`Overleaf Comments: ${skipped} comment thread(s) hidden because their file is not in this workspace (git pull?).`);
-    threads.forEach(t => t.thread.dispose());
-    threads = [];
+    // Update existing threads in place (no tear-down), so nothing blinks and open/closed state is kept.
+    const old = new Map(threads.map(t => [t.comment.threadId, t]));
+    const next: typeof threads = [];
     for (const d of docs) {
       if (!d) continue;
       const { c, uri, doc } = d;
       const a = locate(doc.getText(), c.position, c.selectedText);
       const range = new vscode.Range(doc.positionAt(a.start), doc.positionAt(a.end));
-      const thread = controller.createCommentThread(uri, range, c.messages.map(m => toComment(m, a.found)));
+      const comments = c.messages.map(m => toComment(m, a.found));
+      let prev = old.get(c.threadId);
+      old.delete(c.threadId);
+      if (prev && prev.thread.uri.toString() !== uri.toString()) { prev.thread.dispose(); prev = undefined; }
+      const thread = prev?.thread ?? controller.createCommentThread(uri, range, comments);
+      if (prev) {
+        // Only touch what changed: re-assigning comments would drop an optimistic "Syncing…" reply for nothing.
+        if (prev.comment.messages.map(m => m.id).join() !== c.messages.map(m => m.id).join()) thread.comments = comments;
+        if (!thread.range.isEqual(range)) thread.range = range;
+      }
       thread.canReply = true;
       thread.contextValue = c.resolved ? 'resolved' : 'open';
       thread.state = c.resolved ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
       thread.label = a.found ? undefined : 'Anchor lost (text edited locally)';
-      threads.push({ thread, comment: c, pos: a.start });
+      next.push({ thread, comment: c, pos: a.start });
     }
+    old.forEach(t => t.thread.dispose());
+    threads = next;
     treeChanged.fire();
     for (const e of vscode.window.visibleTextEditors) poke(e.document.uri);
     highlights.apply();
@@ -174,17 +185,16 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     statusItem.command = 'overleafComments.refresh';
     statusItem.show();
   }
-  async function refresh(fetch = true) {
+  async function refresh(fetch = true, useCache = true) {
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) return;
     const cached = ctx.workspaceState.get<ProjectComment[]>(CACHE_KEY);
-    if (cached) await render(folder.uri, cached);
+    if (cached && useCache) await render(folder.uri, cached);
     if (!fetch) return;
     try {
       const id = await projectId(folder.uri.fsPath);
       if (!id) throw new SetupError('No Overleaf git remote found; set overleafComments.projectId.');
-      const status = cfg().get<boolean>('showResolved') ? 'all' : 'open';
-      const comments = await (await getClient()).listComments(id, { status });
+      const comments = await (await getClient()).listComments(id, { status: 'all' }); // resolved threads too: they show as resolved
       await ctx.workspaceState.update(CACHE_KEY, comments);
       await ctx.workspaceState.update(CACHE_AT_KEY, Date.now());
       lastFetch = Date.now();
@@ -203,7 +213,6 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   let prompts: Prompts = {
     confirmPush: (m, ok) => vscode.window.showWarningMessage(m, { modal: true }, ok).then(r => r === ok),
     commitMessage: d => vscode.window.showInputBox({ prompt: 'Commit message', value: d, ignoreFocusOut: true }),
-    replyText: () => vscode.window.showInputBox({ prompt: 'Reply to this Overleaf thread', ignoreFocusOut: true }),
   };
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
   const notThere = (e: unknown) => /Selected text not found/.test(String(e));
@@ -225,31 +234,49 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   }
 
   /** Run a write against Overleaf for the workspace's project, then re-fetch so the UI shows the server's state. */
-  async function write<T>(what: string, fn: (c: NonNullable<typeof client>, projectId: string) => Promise<T>, hint = ''): Promise<T | undefined> {
+  type Written<T> = { ok: true; value: T } | { ok: false };
+  async function write<T>(what: string, fn: (c: NonNullable<typeof client>, projectId: string) => Promise<T>, hint = ''): Promise<Written<T>> {
     const folder = vscode.workspace.workspaceFolders?.[0];
     try {
       if (!folder) throw new SetupError('Open the Overleaf project folder first.');
       const id = await projectId(folder.uri.fsPath);
       if (!id) throw new SetupError('No Overleaf git remote found; set overleafComments.projectId.');
-      const result = await fn(await getClient(), id);
-      await refresh();
-      return result;
+      const value = await fn(await getClient(), id);
+      // Straight to the server's state: rendering the (stale) cache first would undo our optimistic UI.
+      await refresh(true, false);
+      return { ok: true, value };
     } catch (e) {
-      if (e instanceof Cancelled) return undefined;
+      if (e instanceof Cancelled) return { ok: false };
       output.appendLine(`${what}: ${e}`);
       void vscode.window.showErrorMessage(`Overleaf Comments: ${what} failed: ${e instanceof Error ? e.message : e}${hint}`);
-      return undefined;
+      return { ok: false };
     }
   }
+
+  /** A failed write must not lose a long comment: offer to copy it. */
+  function offerCopy(text: string) {
+    void vscode.window.showInformationMessage('Your comment was not sent.', 'Copy text').then(c => c && vscode.env.clipboard.writeText(text));
+  }
+
+  const SYNCING = 'Syncing…';
 
   async function replyOrCreate(r: vscode.CommentReply) {
     const text = r.text.trim();
     if (!text) return;
     const known = threads.find(t => t.thread === r.thread);
     if (known) {
-      // Optimistic: show the reply now; refresh() replaces it with the server's copy.
-      r.thread.comments = [...r.thread.comments, { author: { name: 'You' }, body: new vscode.MarkdownString(text), mode: vscode.CommentMode.Preview }];
-      await write('Reply', (c, id) => c.postCommentMessage(id, known.comment.threadId, text));
+      // Optimistic: show the reply now, marked as syncing; the next render swaps in the server's copy.
+      const before = r.thread.comments;
+      r.thread.comments = [...before, { author: { name: 'You' }, body: new vscode.MarkdownString(text), mode: vscode.CommentMode.Preview, label: SYNCING }];
+      const res = await write('Reply', (c, id) => c.postCommentMessage(id, known.comment.threadId, text));
+      if (!res.ok) {
+        r.thread.comments = before;
+        offerCopy(text);
+      } else {
+        // If the server list did not include it yet, keep the text but drop the "Syncing…" label.
+        const last = r.thread.comments.at(-1);
+        if (last?.label === SYNCING) r.thread.comments = [...r.thread.comments.slice(0, -1), { ...last, label: undefined }];
+      }
       return;
     }
     // New thread from the UI: anchor it to the selected text, or to the clicked line's text if nothing is selected.
@@ -270,15 +297,21 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
       }
     }
     const occurrence = occurrenceAt(doc.getText(), start, selected);
-    r.thread.dispose();
+    const temp = r.thread;
     if (!selected || occurrence === undefined) {
+      temp.dispose();
       void vscode.window.showErrorMessage('Overleaf Comments: nothing to anchor the comment to. Select some text (or click a non-empty line) and try again.');
       return;
     }
     const filePath = vscode.workspace.asRelativePath(doc.uri, false);
     const hint = `\nAnchor text: "${selected.length > 60 ? selected.slice(0, 60) + '…' : selected}"${doc.isDirty ? ' (this file has unsaved changes; Overleaf only has the pushed version)' : ''}. If your local file differs from Overleaf, git pull/push first.`;
     const args = { filePath, content: text, selectedText: selected, occurrence };
-    const added = await write('Add comment', async (c, id) => {
+    // Keep the thread on screen with the typed text until the real one exists (no disappear/reappear).
+    temp.comments = [{ author: { name: 'You' }, body: new vscode.MarkdownString(text), mode: vscode.CommentMode.Preview, label: SYNCING }];
+    temp.canReply = false;
+    temp.label = 'Adding comment…';
+    temp.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    const res = await write('Add comment', async (c, id) => {
       try {
         return await c.addComment(id, args);
       } catch (e) {
@@ -291,6 +324,9 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
         }
       }
     }, hint);
+    temp.dispose(); // the real thread was created by write()'s refresh, so the swap is seamless
+    if (!res.ok) offerCopy(text);
+    const added = res.ok ? res.value : undefined;
     const landed = added && ctx.workspaceState.get<ProjectComment[]>(CACHE_KEY)?.find(c => c.threadId === added.threadId);
     if (added && landed && landed.selectedText !== selected) {
       void vscode.window.showWarningMessage(`Overleaf Comments: the comment attached to different text than selected ("${landed.selectedText.slice(0, 40)}"). Your local file may differ from Overleaf's copy; git pull and check.`);
@@ -303,15 +339,27 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     editor.revealRange(e.thread.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     e.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
   }
-  async function promptReply(e: (typeof threads)[number]) {
-    const text = await prompts.replyText();
-    if (text) await replyOrCreate({ thread: e.thread, text } as vscode.CommentReply);
+  /** Open the thread and put the cursor in its reply box, as if the comment icon had been clicked and Reply pressed.
+   * VS Code has no extension API for this, but its own "Go to Next Comment Thread" does it: park the cursor just
+   * before the thread so that it is the next one. */
+  async function focusReply(e: (typeof threads)[number]) {
+    const editor = await vscode.window.showTextDocument(e.thread.uri, { selection: e.thread.range, preserveFocus: false });
+    const { start } = e.thread.range;
+    const before = start.character > 0 ? start.translate(0, -1) : start.line > 0 ? editor.document.lineAt(start.line - 1).range.end : start;
+    editor.selection = new vscode.Selection(before, before);
+    e.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
+    await vscode.commands.executeCommand('editor.action.nextCommentThreadAction');
   }
 
   async function setResolved(thread: vscode.CommentThread, resolved: boolean) {
     const known = threads.find(t => t.thread === thread);
     if (!known) return;
-    await write(resolved ? 'Resolve' : 'Reopen', (c, id) => (resolved ? c.resolveComment(id, known.comment.threadId) : c.reopenComment(id, known.comment.threadId)));
+    // Show it as done right away; if the server refuses, revert and the error is shown by write().
+    const before = { state: thread.state, context: thread.contextValue };
+    thread.state = resolved ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
+    thread.contextValue = resolved ? 'resolved' : 'open';
+    const res = await write(resolved ? 'Resolve' : 'Reopen', (c, id) => (resolved ? c.resolveComment(id, known.comment.threadId) : c.reopenComment(id, known.comment.threadId)));
+    if (!res.ok) { thread.state = before.state; thread.contextValue = before.context; }
   }
 
   ctx.subscriptions.push(
@@ -341,11 +389,11 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
     vscode.commands.registerCommand('overleafComments.resolve', (t: vscode.CommentThread) => setResolved(t, true)),
     vscode.commands.registerCommand('overleafComments.reopen', (t: vscode.CommentThread) => setResolved(t, false)),
     vscode.commands.registerCommand('overleafComments.treeReveal', (n: Node) => { const e = threadOf(n); return e && revealEntry(e); }),
-    vscode.commands.registerCommand('overleafComments.treeReply', (n: Node) => { const e = threadOf(n); return e && promptReply(e); }),
+    vscode.commands.registerCommand('overleafComments.treeReply', (n: Node) => { const e = threadOf(n); return e && focusReply(e); }),
     vscode.commands.registerCommand('overleafComments.treeResolve', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, true); }),
     vscode.commands.registerCommand('overleafComments.treeReopen', (n: Node) => { const e = threadOf(n); return e && setResolved(e.thread, false); }),
     vscode.commands.registerCommand('overleafComments.close', (t: vscode.CommentThread) => { t.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed; }),
-    vscode.commands.registerCommand('overleafComments.hoverReply', (id: string) => { const e = byId(id); return e && promptReply(e); }),
+    vscode.commands.registerCommand('overleafComments.hoverReply', (id: string) => { const e = byId(id); return e && focusReply(e); }),
     vscode.commands.registerCommand('overleafComments.hoverResolve', (id: string) => { const e = byId(id); return e && setResolved(e.thread, true); }),
     vscode.commands.registerCommand('overleafComments.hoverReopen', (id: string) => { const e = byId(id); return e && setResolved(e.thread, false); }),
     vscode.commands.registerCommand('overleafComments.refresh', () =>

@@ -10,10 +10,11 @@ Comments are cached in VS Code workspace storage (outside the repo), never commi
 
 - **Read:** threads show in the gutter, the Comments panel, and an **Overleaf Comments** view in the activity bar (files, threads, replies; click to jump). Drag that view to the secondary side bar to keep it on the right, as in Overleaf.
 - **Markers:** the commented text is faintly highlighted (orange open, green resolved) and hovering it shows the thread. The comment icon is VS Code's native one: on the last line of a multi-line comment, where the thread opens.
+- **One place for comments:** the extension has its own **Overleaf Comments** view in the activity bar (drag it to the secondary side bar if you want it on the right) and stops VS Code's built-in bottom Comments panel from opening by itself (`comments.openView` is set to `never` while the extension is installed). You can still open that panel by hand.
 - **Hover:** hovering the highlighted text shows the thread (long threads are clipped: first 2 and latest 3 messages, 400 characters each) with **Reply** and **Resolve**/**Reopen** links. Threads open only from VS Code's comment icon or the side panel, never by clicking the text.
 - **Buttons:** each thread has Reply (the reply box), Resolve/Reopen and Close (collapse) in its header.
 - **Reply:** type in the thread's reply box, or use the reply button in the sidebar.
-- **Resolve / reopen:** the check button on a thread (reopen needs `showResolved`).
+- **Resolve / reopen:** the check button on a thread. It looks resolved immediately and reverts with an error if Overleaf refuses. Resolved threads stay visible (and in the Comments panel), greyed, and can be reopened.
 - **New comment:** select text, click the `+` in the gutter, type. With nothing selected it anchors to the clicked line's text, and a blank line is anchored to its line break. the extension asks Overleaf to anchor to that exact occurrence and warns if Overleaf attached it to different text (for example when your local file differs from Overleaf's copy; `git pull` first).
 
 Comment widgets always open below their line; VS Code has no setting for placing them above.
@@ -26,7 +27,7 @@ Comment widgets always open below their line; VS Code has no setting for placing
 3. Comments appear in the gutter and the Comments panel. **Overleaf Comments: Refresh** re-fetches.
 
 Settings: `overleafComments.projectId` (override git-remote detection), `overleafComments.baseUrl`
-(self-hosted), `overleafComments.showResolved`, `overleafComments.refreshMinutes` (re-fetch on window focus when older than N minutes; default 5, 0 = off).
+(self-hosted), `overleafComments.refreshMinutes` (re-fetch on window focus when older than N minutes; default 5, 0 = off).
 
 For scripted or throwaway launches you can instead start VS Code with `OVERLEAF_SESSION_COOKIE` set in its environment; the stored cookie takes precedence.
 

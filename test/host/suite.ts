@@ -85,10 +85,12 @@ export async function run(): Promise<void> {
   assert.deepEqual(calls.pop(), ['reopen', '0123456789abcdef01234567', 'T1']);
 
   // hover links run the same actions by thread id
-  api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d, replyText: async () => 'from hover' });
+  api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d });
   await seed();
   await vscode.commands.executeCommand('overleafComments.hoverReply', 'T1');
-  assert.deepEqual(calls.pop(), ['reply', '0123456789abcdef01234567', 'T1', 'from hover']);
+  // Reply from the hover = open the thread (its reply box cannot be inspected headlessly; checked by hand)
+  assert.equal(api.thread(0).collapsibleState, vscode.CommentThreadCollapsibleState.Expanded);
+  assert.equal(calls.length, 0, 'focusing the reply box must not send anything');
   await seed();
   await vscode.commands.executeCommand('overleafComments.hoverResolve', 'T1');
   assert.deepEqual(calls.pop(), ['resolve', '0123456789abcdef01234567', 'T1']);
@@ -122,6 +124,68 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand('overleafComments.reply', { thread: blankMid, text: 'on a blank line' });
   assert.deepEqual(calls.pop(), ['add', '0123456789abcdef01234567', { filePath: 'chap/f10.tex', content: 'on a blank line', selectedText: '\n', occurrence: doc.getText().slice(0, nl).split('\n').length }]);
 
+  // optimistic UI: nothing disappears while Overleaf syncs, resolve looks done at once, failures roll back
+  {
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+    const server = { messages: [msg('c1'), msg('reply')], resolved: false };
+    let fail = false;
+    let gate: Promise<void> = Promise.resolve();
+    let open = () => {};
+    const hold = () => { gate = new Promise<void>(r => { open = r; }); };
+    const at = () => doc.getText().indexOf('gamma delta');
+    api.useClient({
+      listComments: async () => [{ ...comment('T1', 'gamma delta', at()), messages: server.messages, resolved: server.resolved }],
+      addComment: async () => { await gate; return { ...comment('T9', 'x', 0) }; },
+      postCommentMessage: async (_id: string, _t: string, content: string) => { await gate; if (fail) throw new Error('boom'); server.messages = [...server.messages, msg(content)]; return null; },
+      resolveComment: async () => { await gate; if (fail) throw new Error('boom'); server.resolved = true; return comment('T1', 'x', 0); },
+      reopenComment: async () => { await gate; if (fail) throw new Error('boom'); server.resolved = false; return comment('T1', 'x', 0); },
+    } as never);
+    await api.seedCacheAndRefresh([], true);
+    const t0 = api.thread(0);
+    assert.equal(t0.comments.length, 2);
+
+    hold();
+    const p1 = vscode.commands.executeCommand('overleafComments.reply', { thread: t0, text: 'my reply' });
+    await sleep(150);
+    assert.equal(t0.comments.length, 3, 'reply shows immediately');
+    assert.equal(t0.comments.at(-1)?.label, 'Syncing…');
+    open(); await p1;
+    assert.equal(api.thread(0), t0, 'same thread object: never torn down');
+    assert.equal(t0.comments.length, 3);
+    assert.equal(t0.comments.at(-1)?.label, undefined, 'synced');
+
+    fail = true; hold();
+    const p2 = vscode.commands.executeCommand('overleafComments.reply', { thread: t0, text: 'will fail' });
+    await sleep(150);
+    assert.equal(t0.comments.length, 4, 'optimistic while pending');
+    open(); await p2;
+    assert.equal(t0.comments.length, 3, 'rolled back after the failure');
+
+    fail = false; hold();
+    const p3 = vscode.commands.executeCommand('overleafComments.resolve', t0);
+    await sleep(150);
+    assert.equal(t0.state, vscode.CommentThreadState.Resolved, 'looks resolved immediately');
+    open(); await p3;
+    assert.equal(api.thread(0), t0);
+    assert.deepEqual(api.threads().filter(x => x.uri === uri.toString()).map(x => x.resolved), [true], 'resolved thread stays visible');
+
+    fail = true; hold();
+    const p4 = vscode.commands.executeCommand('overleafComments.reopen', t0);
+    await sleep(150);
+    assert.equal(t0.state, vscode.CommentThreadState.Unresolved, 'reopen shows at once');
+    open(); await p4;
+    assert.equal(t0.state, vscode.CommentThreadState.Resolved, 'reverted when Overleaf refuses');
+
+    fail = false; hold();
+    const g2 = doc.getText().indexOf('gamma delta');
+    const tmp = api.newThread(uri, new vscode.Range(doc.positionAt(g2), doc.positionAt(g2 + 'gamma delta'.length)));
+    const p5 = vscode.commands.executeCommand('overleafComments.reply', { thread: tmp, text: 'a brand new one' });
+    await sleep(150);
+    assert.equal(tmp.comments.at(-1)?.label, 'Syncing…', 'new comment stays on screen while syncing');
+    assert.equal((tmp.comments.at(-1)?.body as vscode.MarkdownString).value, 'a brand new one');
+    open(); await p5;
+  }
+
   // text that is not on Overleaf yet: decline -> nothing pushed, no extra add; accept -> commit, push, retry add
   const git = (...a: string[]) => execFileSync('git', a, { cwd: process.env.OLC_TEST_WS }).toString().trim();
   const bare = (...a: string[]) => execFileSync('git', ['--git-dir', process.env.OLC_TEST_REMOTE!, ...a]).toString().trim();
@@ -142,12 +206,12 @@ export async function run(): Promise<void> {
   const at2 = doc.getText().indexOf('brand new local text');
   const rng = () => new vscode.Range(doc.positionAt(at2), doc.positionAt(at2 + 'brand new local text'.length));
 
-  api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d, replyText: async () => undefined });
+  api.setPrompts({ confirmPush: async () => false, commitMessage: async d => d });
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.newThread(uri, rng()), text: 'declined' });
   assert.equal(calls.length, 0);
   assert.throws(() => bare('log', '--oneline'), 'nothing may be pushed when the user declines');
 
-  api.setPrompts({ confirmPush: async () => true, commitMessage: async d => `${d} (test)`, replyText: async () => undefined });
+  api.setPrompts({ confirmPush: async () => true, commitMessage: async d => `${d} (test)` });
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.newThread(uri, rng()), text: 'accepted' });
   assert.equal(calls.length, 1, 'comment added after the push');
   assert.match(git('log', '--format=%s', '-1'), /^Update chap\/f10\.tex \(test\)$/);

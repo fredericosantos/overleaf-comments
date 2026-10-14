@@ -93,11 +93,6 @@
           "default": "https://www.overleaf.com",
           "description": "Overleaf instance URL (self-hosted: your server)."
         },
-        "overleafComments.showResolved": {
-          "type": "boolean",
-          "default": false,
-          "description": "Also show resolved threads."
-        },
         "overleafComments.refreshMinutes": {
           "type": "number",
           "default": 5,
@@ -224,7 +219,10 @@
         "view": "overleafComments.threads",
         "contents": "No comments loaded.\n[Set Session Cookie](command:overleafComments.setCookie)\n[Refresh](command:overleafComments.refresh)"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "comments.openView": "never"
+    }
   },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js --banner:js=\"const __importMetaUrl=require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl",
