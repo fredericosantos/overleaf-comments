@@ -70,6 +70,7 @@ export async function run(): Promise<void> {
   const seed = () => api.render(root, [{ ...comment('T1', 'gamma delta', doc.getText().indexOf('gamma delta')) }]);
 
   await seed();
+  assert.deepEqual(api.tree(), [{ file: 'chap/f10.tex', threads: ['c1'] }]); // sidebar tree mirrors the thread
   await vscode.commands.executeCommand('overleafComments.reply', { thread: api.thread(0), text: '  hello  ' });
   assert.deepEqual(calls.pop(), ['reply', '0123456789abcdef01234567', 'T1', 'hello']);
 

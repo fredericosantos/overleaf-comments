@@ -4,7 +4,16 @@ VS Code extension that shows Overleaf review comments (threads, replies, resolve
 text, for projects you sync with Overleaf's git bridge. Git carries your files; comments live only in
 Overleaf's UI, so this fetches them live and renders them with VS Code's native comments UI.
 
-Read-only. Comments are cached in VS Code workspace storage (outside the repo), never committed.
+Comments are cached in VS Code workspace storage (outside the repo), never committed.
+
+## What you can do
+
+- **Read:** threads show in the gutter, the Comments panel, and an **Overleaf Comments** view in the activity bar (files, threads, replies; click to jump). Drag that view to the secondary side bar to keep it on the right, as in Overleaf.
+- **Reply:** type in the thread's reply box, or use the reply button in the sidebar.
+- **Resolve / reopen:** the check button on a thread (reopen needs `showResolved`).
+- **New comment:** select text, click the `+` in the gutter, type. The selected text must be non-empty; the extension asks Overleaf to anchor to that exact occurrence and warns if Overleaf attached it to different text (for example when your local file differs from Overleaf's copy; `git pull` first).
+
+Comment widgets always open below their line; VS Code has no setting for placing them above.
 
 ## Use
 
@@ -15,6 +24,8 @@ Read-only. Comments are cached in VS Code workspace storage (outside the repo), 
 
 Settings: `overleafComments.projectId` (override git-remote detection), `overleafComments.baseUrl`
 (self-hosted), `overleafComments.showResolved`, `overleafComments.refreshMinutes` (re-fetch on window focus when older than N minutes; default 5, 0 = off).
+
+If you see "No session cookie", this VS Code profile has no cookie yet: run **Overleaf Comments: Set Session Cookie** once (the cookie is stored per VS Code profile).
 
 Anchors are matched by the commented text, nearest to Overleaf's offset; if you edited that text
 locally the thread is labelled "anchor lost" at its approximate position.

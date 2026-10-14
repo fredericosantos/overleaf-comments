@@ -22,7 +22,8 @@
       },
       {
         "command": "overleafComments.refresh",
-        "title": "Overleaf Comments: Refresh"
+        "title": "Overleaf Comments: Refresh",
+        "icon": "$(refresh)"
       },
       {
         "command": "overleafComments.clearCookie",
@@ -41,6 +42,25 @@
         "command": "overleafComments.reopen",
         "title": "Reopen thread",
         "icon": "$(debug-restart)"
+      },
+      {
+        "command": "overleafComments.treeReply",
+        "title": "Reply",
+        "icon": "$(comment)"
+      },
+      {
+        "command": "overleafComments.treeResolve",
+        "title": "Resolve thread",
+        "icon": "$(check)"
+      },
+      {
+        "command": "overleafComments.treeReopen",
+        "title": "Reopen thread",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "overleafComments.treeReveal",
+        "title": "Show in editor"
       }
     ],
     "configuration": {
@@ -82,6 +102,22 @@
         {
           "command": "overleafComments.reopen",
           "when": "false"
+        },
+        {
+          "command": "overleafComments.treeReply",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.treeResolve",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.treeReopen",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.treeReveal",
+          "when": "false"
         }
       ],
       "comments/commentThread/context": [
@@ -102,8 +138,55 @@
           "group": "navigation",
           "when": "commentController == overleaf && commentThread == resolved"
         }
+      ],
+      "view/item/context": [
+        {
+          "command": "overleafComments.treeReply",
+          "group": "inline@1",
+          "when": "view == overleafComments.threads && viewItem == open"
+        },
+        {
+          "command": "overleafComments.treeResolve",
+          "group": "inline@2",
+          "when": "view == overleafComments.threads && viewItem == open"
+        },
+        {
+          "command": "overleafComments.treeReopen",
+          "group": "inline@1",
+          "when": "view == overleafComments.threads && viewItem == resolved"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "overleafComments.refresh",
+          "group": "navigation",
+          "when": "view == overleafComments.threads"
+        }
       ]
-    }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "overleafComments",
+          "title": "Overleaf Comments",
+          "icon": "media/comments.svg"
+        }
+      ]
+    },
+    "views": {
+      "overleafComments": [
+        {
+          "id": "overleafComments.threads",
+          "name": "Threads"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "overleafComments.threads",
+        "contents": "No comments loaded.\n[Set Session Cookie](command:overleafComments.setCookie)\n[Refresh](command:overleafComments.refresh)"
+      }
+    ]
   },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js --banner:js=\"const __importMetaUrl=require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl",
