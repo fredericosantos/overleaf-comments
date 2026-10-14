@@ -260,7 +260,7 @@ export async function run(): Promise<void> {
   assert.equal(pending.contextValue, 'unsynced', 'the thread offers Retry sync / Discard');
   assert.match(pending.label ?? '', /Not on Overleaf yet|not on Overleaf yet/i, 'quietly labelled, not an error');
   assert.equal(pending.comments.at(-1)?.label, 'Not synced');
-  assert.equal(api.unsynced(), 1, 'drawn as not synced (blue), tracked so it follows edits');
+  assert.equal(api.unsynced(), 1, 'drawn as not synced (dashed outline), tracked so it follows edits');
   assert.equal((pending.comments.at(-1)?.body as vscode.MarkdownString).value, 'waiting for the push', 'the text is kept');
 
   await vscode.commands.executeCommand('overleafComments.retrySync', pending); // attempt 2: still not there

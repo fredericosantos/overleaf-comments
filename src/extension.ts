@@ -41,7 +41,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
   const session = new Session(ctx);
   // threads <-> tree: the tree reads the model and asks threads where an open comment currently is.
   let tree: CommentsTree;
-  const threads = new Threads(model, output, session, ctx.extensionUri, () => tree.refresh());
+  const threads = new Threads(model, output, session, () => tree.refresh());
   tree = new CommentsTree(() => model.view(Date.now()), id => threads.byId(id)?.thread.range.start.line);
   const treeView = vscode.window.createTreeView('overleafComments.threads', { treeDataProvider: tree });
   const sync = new Sync(ctx, session, model, threads, output);

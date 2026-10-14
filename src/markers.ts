@@ -1,7 +1,7 @@
 // What we draw on top of VS Code's native comment icon: a faint orange background on exactly the commented text
 // (whole lines when the comment spans several). Open comments only: resolved ones are shown in the sidebar.
-// Comments that are not on Overleaf yet look different: blue dashed highlight and a blue sync icon in the gutter margin
-// (the native icon cannot be recolored per thread).
+// Comments that are not on Overleaf yet look different: same orange, but with a dashed outline (the native icon
+// cannot be changed per thread, so the difference lives in the text highlight).
 import * as vscode from 'vscode';
 import type { ProjectComment } from '@aloth/olcli';
 import { highlightShape } from './anchor.ts';
@@ -12,17 +12,10 @@ export class Highlights implements vscode.Disposable {
   private readonly open = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(245,166,35,0.16)', borderRadius: '2px' });
   private readonly openLines = vscode.window.createTextEditorDecorationType({ isWholeLine: true, backgroundColor: 'rgba(245,166,35,0.16)' });
 
-  private readonly unsyncedText = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(90,169,255,0.16)', border: '1px dashed rgba(90,169,255,0.85)', borderRadius: '2px' });
-  private readonly unsyncedLines = vscode.window.createTextEditorDecorationType({ isWholeLine: true, backgroundColor: 'rgba(90,169,255,0.16)' });
-  private readonly unsyncedGlyph: vscode.TextEditorDecorationType;
+  private readonly unsyncedText = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(245,166,35,0.16)', border: '1px dashed rgba(245,166,35,0.85)', borderRadius: '2px' });
+  private readonly unsyncedLines = vscode.window.createTextEditorDecorationType({ isWholeLine: true, backgroundColor: 'rgba(245,166,35,0.16)', borderStyle: 'dashed', borderColor: 'rgba(245,166,35,0.85)', borderWidth: '1px 0' });
 
-  constructor(
-    private readonly entries: () => MarkerEntry[],
-    private readonly unsynced: () => vscode.CommentThread[],
-    extensionUri: vscode.Uri,
-  ) {
-    this.unsyncedGlyph = vscode.window.createTextEditorDecorationType({ gutterIconPath: vscode.Uri.joinPath(extensionUri, 'media', 'unsynced.svg'), gutterIconSize: 'contain' });
-  }
+  constructor(private readonly entries: () => MarkerEntry[], private readonly unsynced: () => vscode.CommentThread[]) {}
 
   /** Redraw every visible editor from the current threads. */
   apply(): void {
@@ -49,9 +42,8 @@ export class Highlights implements vscode.Disposable {
       }
       editor.setDecorations(this.unsyncedText, pText);
       editor.setDecorations(this.unsyncedLines, pLines);
-      editor.setDecorations(this.unsyncedGlyph, pending.map(t => new vscode.Range(t.range.start.line, 0, t.range.start.line, 0)));
     }
   }
 
-  dispose(): void { [this.open, this.openLines, this.unsyncedText, this.unsyncedLines, this.unsyncedGlyph].forEach(d => d.dispose()); }
+  dispose(): void { [this.open, this.openLines, this.unsyncedText, this.unsyncedLines].forEach(d => d.dispose()); }
 }

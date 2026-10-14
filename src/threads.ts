@@ -33,8 +33,8 @@ export class Threads implements vscode.Disposable {
   private warnedMissing = '';
 
   /** `onChange`: called whenever the set or position of threads changed (the sidebar redraws). */
-  constructor(private readonly model: Model, private readonly output: vscode.OutputChannel, session: Session, extensionUri: vscode.Uri, private readonly onChange: () => void) {
-    this.highlights = new Highlights(() => this.entries, () => [...this.unsynced.keys()], extensionUri);
+  constructor(private readonly model: Model, private readonly output: vscode.OutputChannel, session: Session, private readonly onChange: () => void) {
+    this.highlights = new Highlights(() => this.entries, () => [...this.unsynced.keys()]);
     this.controller.commentingRangeProvider = {
       provideCommentingRanges: doc => (session.isOverleaf !== false && doc.uri.scheme === 'file' && /\.tex$/i.test(doc.uri.fsPath) && doc.lineCount ? [new vscode.Range(0, 0, doc.lineCount - 1, 0)] : []),
     };
