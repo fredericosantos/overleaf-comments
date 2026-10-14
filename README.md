@@ -29,6 +29,7 @@ Install a built package with `code --install-extension overleaf-comments.vsix`
 git clone --recurse-submodules https://github.com/fredericosantos/overleaf-comments
 cd overleaf-comments/vendor/olcli && npm ci && npm run build && cd ../..
 npm install && npm test && npm run build
+npm run test:host   # drives an isolated VS Code (set VSCODE_EXECUTABLE if not in /Applications)
 code --extensionDevelopmentPath=$PWD <your-overleaf-clone>
 ```
 

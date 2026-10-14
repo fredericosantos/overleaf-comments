@@ -9,7 +9,13 @@ const COOKIE_KEY = 'overleafComments.cookie';
 const CACHE_KEY = 'overleafComments.cache';
 const run = promisify(execFile);
 
-export function activate(ctx: vscode.ExtensionContext) {
+export interface ExtensionApi {
+  /** Test seam: render fixture comments without touching the network. */
+  render(root: vscode.Uri, comments: ProjectComment[]): Promise<void>;
+  threads(): { uri: string; line: number; label?: string; resolved: boolean; messages: number }[];
+}
+
+export function activate(ctx: vscode.ExtensionContext): ExtensionApi {
   const controller = vscode.comments.createCommentController('overleaf', 'Overleaf');
   const output = vscode.window.createOutputChannel('Overleaf Comments');
   // Each thread remembers its comment and last known offset so edits can re-anchor it.
@@ -117,6 +123,16 @@ export function activate(ctx: vscode.ExtensionContext) {
     }),
   );
   void refresh(false).then(() => refresh());
+  return {
+    render,
+    threads: () => threads.map(t => ({
+      uri: t.thread.uri.toString(),
+      line: t.thread.range.start.line,
+      label: t.thread.label,
+      resolved: t.thread.state === vscode.CommentThreadState.Resolved,
+      messages: t.thread.comments.length,
+    })),
+  };
 }
 
 function author(m: CommentMessage): string {
