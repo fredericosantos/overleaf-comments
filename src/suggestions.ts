@@ -25,7 +25,7 @@ export interface Suggestion {
 /** How much of the surrounding text must still match to find a suggestion again in an edited file. */
 const CONTEXT = 16;
 
-const authorOfChange = (c: TrackedChange): string => [c.user?.first_name, c.user?.last_name].filter(Boolean).join(' ') || c.user?.email || 'unknown';
+const authorOfChange = (c: TrackedChange): string => c.author.name || c.author.email || 'unknown';
 
 /** One suggestion per change, except that a deletion right at either end of an insertion (same author) is shown with
  * it, as "Changed: old to new", like Overleaf does. */
@@ -36,13 +36,13 @@ export function groupChanges(changes: TrackedChange[]): Suggestion[] {
   for (const c of sorted) {
     if (taken.has(c.id)) continue;
     taken.add(c.id);
-    const base = { id: c.id, ids: [c.id], docId: c.docId, path: c.path, position: c.position, line: c.line, before: c.before, after: c.after, author: authorOfChange(c), timestamp: c.timestamp };
+    const base = { id: c.id, ids: [c.id], docId: c.docId, path: c.path, position: c.position, line: c.line, before: c.before ?? '', after: c.after ?? '', author: authorOfChange(c), timestamp: c.timestamp };
     if (c.kind === 'delete') {
       out.push({ ...base, inserted: '', deleted: c.text });
       continue;
     }
     const end = c.position + c.text.length;
-    const del = sorted.find(d => !taken.has(d.id) && d.kind === 'delete' && d.docId === c.docId && d.userId === c.userId && (d.position === end || d.position === c.position));
+    const del = sorted.find(d => !taken.has(d.id) && d.kind === 'delete' && d.docId === c.docId && d.author.id === c.author.id && (d.position === end || d.position === c.position));
     if (del) taken.add(del.id);
     out.push({ ...base, ids: del ? [c.id, del.id] : [c.id], inserted: c.text, deleted: del?.text ?? '' });
   }

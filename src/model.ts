@@ -5,7 +5,7 @@ import { groupChanges, type Suggestion } from './suggestions.ts';
 
 /** How long we keep showing an optimistic resolve/reopen if the server still reports the old state. */
 export const INTENT_TTL_MS = 15_000;
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3; // 3: tracked changes in upstream olcli's shape (author)
 
 export class Model {
   private server: ProjectComment[] = [];
@@ -93,6 +93,6 @@ export function parseCache(raw: unknown, projectId: string | undefined): CacheFi
   if (!r || r.v !== CACHE_VERSION || !Array.isArray(r.comments) || !Array.isArray(r.changes) || typeof r.at !== 'number') return undefined;
   if (projectId !== undefined && r.projectId !== projectId) return undefined;
   const ok = r.comments.every(c => c && typeof c.threadId === 'string' && typeof c.path === 'string' && typeof c.position === 'number' && Array.isArray(c.messages))
-    && r.changes.every(c => c && typeof c.id === 'string' && typeof c.path === 'string' && typeof c.position === 'number' && typeof c.text === 'string' && (c.kind === 'insert' || c.kind === 'delete'));
+    && r.changes.every(c => c && typeof c.id === 'string' && typeof c.path === 'string' && typeof c.position === 'number' && typeof c.text === 'string' && (c.kind === 'insert' || c.kind === 'delete') && !!c.author);
   return ok ? (r as CacheFile) : undefined;
 }

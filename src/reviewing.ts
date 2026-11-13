@@ -118,7 +118,7 @@ export class Reviewing implements vscode.Disposable {
       const list = this.changes.get(doc.uri.toString());
       if (!list?.length) continue;
       const path = this.relPath(doc.uri);
-      const asTracked = list.map((c): TrackedChange => ({ id: c.id, docId: '', path, position: c.at, line: doc.positionAt(c.at).line + 1, kind: c.kind, text: c.text, before: '', after: '', userId: 'you', user: { id: 'you', first_name: 'You' } }));
+      const asTracked = list.map((c): TrackedChange => ({ id: c.id, docId: '', path, position: c.at, line: doc.positionAt(c.at).line + 1, column: 0, kind: c.kind, text: c.text, author: { id: 'you', name: 'You' } }));
       for (const s of groupChanges(asTracked)) out.push({ uri: doc.uri, s, start: s.position, end: s.position + s.inserted.length });
     }
     return out;
