@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (preview)
 
 - Suggestions (track changes) appear as threads with Accept / Reject, and in the sidebar: insertions in green, deletions as a red marker, a deletion next to an insertion as "Changed: old to new". Accept only clears the marker on Overleaf (your file already has the text). Reject undoes the change in your local file, for you to push, and clears the marker on Overleaf.
 - Reviewing mode (the pencil button in the Overleaf Comments panel): what you type becomes local suggestions, kept in the file and marked "Not synced". Once you push, each one is turned into a real suggestion on Overleaf (the pushed text is undone and redone as tracked; the text stays the same, so the next pull is clean).
