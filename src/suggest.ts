@@ -33,8 +33,8 @@ export class SuggestionThreads implements vscode.Disposable {
   localEntries: SuggestionEntry[] = [];
   private renderGen = 0;
   private readonly insertedText = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(46,160,67,0.25)', borderRadius: '2px' });
-  // A zero-width space with a red left border: a thin bar where text was deleted, without shifting the text much.
-  private readonly deletedMark = vscode.window.createTextEditorDecorationType({ before: { contentText: '​', border: '0 0 0 2px solid rgba(248,81,73,0.9)' } });
+  // A zero-width space with a red outline: a thin bar where text was deleted (Overleaf draws a red dotted bar there).
+  private readonly deletedMark = vscode.window.createTextEditorDecorationType({ before: { contentText: '\u200b', border: '1px dotted rgba(248,81,73,0.95)' } });
 
   /** `onChange`: the set or position of suggestions changed (the sidebar redraws). */
   constructor(
@@ -117,7 +117,7 @@ export class SuggestionThreads implements vscode.Disposable {
       } else if (!thread.range.isEqual(where)) thread.range = where;
       thread.canReply = false;
       thread.contextValue = 'suggestion';
-      thread.label = found ? undefined : ANCHOR_LOST;
+      thread.label = found ? 'Suggestion' : ANCHOR_LOST; // with no label VS Code shows "Start discussion"
       next.push({ thread, s, start, end, found });
     }
     old.forEach(e => e.thread.dispose());
@@ -164,7 +164,7 @@ export class SuggestionThreads implements vscode.Disposable {
       }
       Object.assign(x, { start, end, found });
       x.thread.range = range(e.document, start, end);
-      x.thread.label = found ? undefined : ANCHOR_LOST;
+      x.thread.label = found ? 'Suggestion' : ANCHOR_LOST;
     }
     this.apply();
     this.onChange();

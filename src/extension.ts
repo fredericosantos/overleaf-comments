@@ -50,7 +50,11 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
   suggestions = new SuggestionThreads(threads.controller, model, () => reviewing.items(), output, () => tree.refresh());
   tree = new CommentsTree(() => model.view(Date.now()), () => [...model.suggestions(), ...reviewing.items().map(x => x.s)], id => (threads.byId(id) ?? suggestions.byId(id))?.thread.range.start.line);
   const treeView = vscode.window.createTreeView('overleafComments.threads', { treeDataProvider: tree });
-  const showMode = () => { treeView.description = reviewing.on ? 'Reviewing' : ''; };
+  // The view's description is hidden when it is the only view in its container: say it at the top of the list too.
+  const showMode = () => {
+    treeView.description = reviewing.on ? 'Reviewing' : '';
+    treeView.message = reviewing.on ? 'Reviewing: your edits become suggestions. The button above switches back to Editing.' : undefined;
+  };
   showMode();
   const sync = new Sync(ctx, session, model, threads, suggestions, output);
   const writes = new Writes(ctx, session, model, threads, suggestions, reviewing, sync, output);
