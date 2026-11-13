@@ -232,3 +232,55 @@ test('KNOWN LIMIT: repeated text + a pull that rewrites the commented copy: it m
   assert.equal(r.found, true); // nearest remaining copy: the comment now sits on a DIFFERENT line than before
   assert.notEqual(r.line, 2);
 });
+
+import { groupChanges, locateSuggestion, verbOf } from '../src/suggestions.ts';
+import type { TrackedChange } from '@aloth/olcli';
+
+// The live example: "memory as a function of the population size and" with tracked changes, as Overleaf returned it.
+const LIVE = 'memory as a  population-size something  and of the';
+const ch = (id: string, kind: 'insert' | 'delete', text: string, position: number): TrackedChange => {
+  const end = kind === 'insert' ? position + text.length : position;
+  return { id, docId: 'd', path: 'main.tex', position, line: 1, kind, text, before: LIVE.slice(Math.max(0, position - 40), position), after: LIVE.slice(end, end + 40), userId: 'u', user: { id: 'u', first_name: 'Ada', last_name: 'L' } };
+};
+const liveChanges = [ch('c1', 'delete', 'function of the', 12), ch('c2', 'insert', 'population-size something', 13), ch('c3', 'delete', 'population', 38), ch('c4', 'delete', 'size', 39)];
+
+test('groupChanges: a deletion right after an insertion is one "Changed" suggestion', () => {
+  const g = groupChanges(liveChanges);
+  assert.deepEqual(g.map(s => [verbOf(s), s.ids, s.deleted, s.inserted, s.author]), [
+    ['Deleted', ['c1'], 'function of the', '', 'Ada L'],
+    ['Changed', ['c2', 'c3'], 'population', 'population-size something', 'Ada L'],
+    ['Deleted', ['c4'], 'size', '', 'Ada L'],
+  ]);
+});
+
+test('locateSuggestion: found by its context after local edits, deletions are zero-width', () => {
+  const [del, changed] = groupChanges(liveChanges);
+  assert.deepEqual(locateSuggestion(LIVE, changed), { start: 13, end: 38, found: true });
+  const edited = `NEW TEXT ${LIVE}`; // the user typed above it: Overleaf's offset is now 9 off
+  assert.deepEqual(locateSuggestion(edited, changed), { start: 22, end: 47, found: true });
+  assert.deepEqual(locateSuggestion(edited, del), { start: 21, end: 21, found: true });
+  // the context was edited, the inserted text was not: still found by the inserted text
+  assert.equal(locateSuggestion('xx population-size something yy', changed).found, true);
+  assert.equal(locateSuggestion('nothing like it', del).found, false);
+});
+
+test('model: accepted/rejected suggestions stay hidden until the server drops them; cache keeps changes', () => {
+  const m = new Model();
+  m.applyFetch(m.nextTicket(), [], liveChanges);
+  assert.equal(m.suggestions().length, 3);
+  m.setHandled(['c2', 'c3'], true);
+  assert.deepEqual(m.suggestions().map(s => s.id), ['c1', 'c4']);
+  m.setHandled(['c2', 'c3'], false); // the write failed: shown again
+  assert.equal(m.suggestions().length, 3);
+  m.setHandled(['c2', 'c3'], true);
+  m.applyFetch(m.nextTicket(), [], liveChanges.filter(c => c.id !== 'c2' && c.id !== 'c3'));
+  assert.deepEqual(m.suggestions().map(s => s.id), ['c1', 'c4']);
+  m.applyFetch(m.nextTicket(), [], liveChanges); // Overleaf still lists them (the accept did not take): back after the TTL
+  m.setHandled(['c2', 'c3'], true, 0);
+  assert.equal(m.suggestions(INTENT_TTL_MS - 1).length, 2);
+  assert.equal(m.suggestions(INTENT_TTL_MS).length, 3);
+  const file = serializeCache('P1', [], 1, liveChanges);
+  assert.equal(parseCache(file, 'P1')?.changes.length, 4);
+  assert.equal(parseCache({ ...file, changes: [{ id: 'x' }] }, 'P1'), undefined);
+  assert.equal(parseCache({ v: 1, projectId: 'P1', at: 1, comments: [] }, 'P1'), undefined); // a v1 cache: refetch
+});

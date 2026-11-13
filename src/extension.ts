@@ -4,10 +4,11 @@ import type { ProjectComment } from '@aloth/olcli';
 import { Model, serializeCache } from './model.ts';
 import { Session } from './session.ts';
 import { Threads } from './threads.ts';
+import { SuggestionThreads } from './suggest.ts';
 import { Sync } from './sync.ts';
 import { Writes } from './writes.ts';
 import { CommentsTree, commentOf, firstText, type Node } from './tree.ts';
-import { focusReply, reveal } from './navigate.ts';
+import { focusReply, reveal, revealSuggestion } from './navigate.ts';
 import { CACHE_KEY, COOKIE_KEY, cfg, setContext, type Client, type Reply } from './common.ts';
 
 /** Only handed out in extension-test mode; the shipped extension exposes nothing. */
@@ -42,18 +43,21 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
   // threads <-> tree: the tree reads the model and asks threads where an open comment currently is.
   let tree: CommentsTree;
   const threads = new Threads(model, output, session, () => tree.refresh());
-  tree = new CommentsTree(() => model.view(Date.now()), id => threads.byId(id)?.thread.range.start.line);
+  const suggestions = new SuggestionThreads(threads.controller, model, output, () => tree.refresh());
+  tree = new CommentsTree(() => model.view(Date.now()), () => model.suggestions(), id => (threads.byId(id) ?? suggestions.byId(id))?.thread.range.start.line);
   const treeView = vscode.window.createTreeView('overleafComments.threads', { treeDataProvider: tree });
-  const sync = new Sync(ctx, session, model, threads, output);
-  const writes = new Writes(session, model, threads, sync, output);
+  const sync = new Sync(ctx, session, model, threads, suggestions, output);
+  const writes = new Writes(session, model, threads, suggestions, sync, output);
+  /** Accept/Reject come from a thread header (a thread) or the sidebar (a tree node). */
+  const suggestionId = (x: vscode.CommentThread | Node) => ('kind' in x ? (x.kind === 'suggestion' ? x.s.id : undefined) : suggestions.byThread(x)?.s.id);
   drain = writes.drain;
 
   const command = (id: string, fn: (...args: never[]) => unknown) => vscode.commands.registerCommand(`overleafComments.${id}`, fn);
 
   ctx.subscriptions.push(
-    output, threads, tree, treeView, sync, writes,
+    output, suggestions, threads, tree, treeView, sync, writes,
     vscode.window.onDidChangeActiveTextEditor(e => e && threads.redraw(e.document.uri)),
-    vscode.window.onDidChangeVisibleTextEditors(es => { es.forEach(e => threads.redraw(e.document.uri)); threads.highlights.apply(); }),
+    vscode.window.onDidChangeVisibleTextEditors(es => { es.forEach(e => threads.redraw(e.document.uri)); threads.highlights.apply(); suggestions.apply(); }),
     vscode.window.onDidChangeWindowState(w => {
       const mins = cfg().get<number>('refreshMinutes'); // default (5) comes from package.json
       if (w.focused && mins && mins > 0 && sync.lastFetch && Date.now() - sync.lastFetch > mins * 60_000) void sync.refresh({ quiet: true });
@@ -63,9 +67,11 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
         void sync.reset().then(() => sync.refresh({ quiet: true })); // new host / project: start over
       }
     }),
-    vscode.workspace.onDidChangeTextDocument(e => threads.onTextChange(e)),
+    vscode.workspace.onDidChangeTextDocument(e => { threads.onTextChange(e); suggestions.onTextChange(e); }),
     vscode.window.onDidChangeTextEditorSelection(e => {
-      if (e.kind === vscode.TextEditorSelectionChangeKind.Mouse) threads.collapseOutside(e.textEditor.document.uri, e.selections[0]);
+      if (e.kind !== vscode.TextEditorSelectionChangeKind.Mouse) return;
+      threads.collapseOutside(e.textEditor.document.uri, e.selections[0]);
+      suggestions.collapseOutside(e.textEditor.document.uri, e.selections[0]);
     }),
     command('reply', (r: Reply) => writes.onReply(r)),
     command('resolve', (t: vscode.CommentThread) => { const e = threads.entries.find(x => x.thread === t); return e && writes.track(writes.setResolved(e.comment.threadId, true)); }),
@@ -75,7 +81,13 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     command('showThread', (threadId: string) => threads.toggleAll(threadId)),
     command('showAll', (t: vscode.CommentThread) => threads.toggleAll(t)), // the header shows one or the other, depending on the thread's state
     command('collapseAll', (t: vscode.CommentThread) => threads.toggleAll(t)),
-    command('treeReveal', (n: Node) => { const c = commentOf(n); return c && reveal(threads, c); }),
+    command('treeReveal', (n: Node) => {
+      if (n.kind === 'suggestion') { const e = suggestions.byId(n.s.id); return e && revealSuggestion(e); }
+      const c = commentOf(n);
+      return c && reveal(threads, c);
+    }),
+    command('acceptSuggestion', (x: vscode.CommentThread | Node) => { const id = suggestionId(x); return id && writes.track(writes.acceptSuggestion(id)); }),
+    command('rejectSuggestion', (x: vscode.CommentThread | Node) => { const id = suggestionId(x); return id && writes.track(writes.rejectSuggestion(id)); }),
     command('treeReply', (n: Node) => { const c = commentOf(n); const e = c && threads.byId(c.threadId); return e && focusReply(e); }),
     command('treeResolve', (n: Node) => { const c = commentOf(n); return c && writes.track(writes.setResolved(c.threadId, true)); }),
     command('treeReopen', (n: Node) => { const c = commentOf(n); return c && writes.track(writes.setResolved(c.threadId, false)); }),
@@ -100,7 +112,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
 
   if (ctx.extensionMode !== vscode.ExtensionMode.Test) return undefined;
   return {
-    render: async (_root, comments) => { model.reset(); model.applyFetch(model.nextTicket(), comments); await threads.render(); }, // reset: no intent from an earlier step may leak in
+    render: async (_root, comments) => { model.reset(); model.applyFetch(model.nextTicket(), comments); await Promise.all([threads.render(), suggestions.render()]); }, // reset: no intent from an earlier step may leak in
     seedCacheAndRefresh: async (comments, fetch) => {
       model.reset(); // as if the window had just been opened
       sync.statusItem.text = '';

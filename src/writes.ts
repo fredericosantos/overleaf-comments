@@ -1,12 +1,13 @@
-// Everything that changes things on Overleaf: replies, new comments (with the commit-and-push offer), resolve/reopen.
+// Everything that changes things on Overleaf: replies, new comments, resolve/reopen, accepting/rejecting suggestions.
 // Each is optimistic: the UI changes at once, and is rolled back (with the error shown) if Overleaf refuses.
 import * as vscode from 'vscode';
-import { anchorAt } from './anchor.ts';
+import { anchorAt, lfView } from './anchor.ts';
 import { INTENT_TTL_MS, type Model } from './model.ts';
 import type { Session } from './session.ts';
 import type { Sync } from './sync.ts';
 import type { Threads } from './threads.ts';
-import { Cancelled, NOT_ON_OVERLEAF, RERENDER_SLACK_MS, SYNCING, type Client, type NewCommentArgs, type Reply, type Written } from './common.ts';
+import type { SuggestionThreads } from './suggest.ts';
+import { Cancelled, NOT_ON_OVERLEAF, RERENDER_SLACK_MS, SYNCING, range, type Client, type NewCommentArgs, type Reply, type Written } from './common.ts';
 
 const optimistic = (text: string): vscode.Comment => ({ author: { name: 'You' }, body: new vscode.MarkdownString(text), mode: vscode.CommentMode.Preview, label: SYNCING });
 
@@ -22,6 +23,7 @@ export class Writes implements vscode.Disposable {
     private readonly session: Session,
     private readonly model: Model,
     private readonly threads: Threads,
+    private readonly suggestions: SuggestionThreads,
     private readonly sync: Sync,
     private readonly output: vscode.OutputChannel,
   ) {
@@ -175,6 +177,9 @@ export class Writes implements vscode.Disposable {
     temp.comments = [{ ...optimistic(args.content), label: 'Not synced' }];
     temp.label = "Text not on Overleaf yet · it syncs once you've pushed it";
     temp.contextValue = 'unsynced';
+    // The only per-thread gutter icon stable API offers: "unresolved" swaps the plain bubble for the bubble-with-dot.
+    // ponytail: the "pending" (comment-draft) icon needs the proposed commentsDraftState API, which Marketplace builds can't use.
+    temp.state = vscode.CommentThreadState.Unresolved;
     temp.canReply = false;
     temp.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     this.unsynced.set(temp, { uri: doc.uri, args });
@@ -224,6 +229,51 @@ export class Writes implements vscode.Disposable {
       model.clearIntent(threadId, resolved);
       await threads.render();
     }
+  }
+
+  /** Accept: Overleaf keeps the change and drops the marker. The local file already has the accepted text. */
+  async acceptSuggestion(id: string): Promise<void> {
+    const e = this.suggestions.byId(id);
+    if (e) await this.clearSuggestion(e.s.ids, e.s.docId, 'Accept suggestion');
+  }
+
+  /** Reject: undo the change in the LOCAL file (the user pushes it as usual), then accept on Overleaf, which only clears
+   * the marker there. No edit is sent to Overleaf's text, so a later push or pull cannot conflict with it. */
+  async rejectSuggestion(id: string): Promise<void> {
+    const e = this.suggestions.byId(id);
+    if (!e) return;
+    const doc = await vscode.workspace.openTextDocument(e.thread.uri);
+    const v = lfView(doc.getText());
+    if (!e.found || v.lf.slice(v.fromDoc(e.start), v.fromDoc(e.end)) !== e.s.inserted) {
+      void vscode.window.showErrorMessage('Overleaf Comments: the suggested text is not where it should be in your file (edited locally?). git pull, then try again.');
+      return;
+    }
+    const eol = doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(doc.uri, range(doc, e.start, e.end), e.s.deleted.replace(/\n/g, eol));
+    const { ids, docId } = e.s;
+    this.model.setHandled(ids, true);
+    await this.suggestions.render(); // the thread goes away before the text changes under it
+    if (!(await vscode.workspace.applyEdit(edit))) {
+      this.model.setHandled(ids, false);
+      await this.suggestions.render();
+      void vscode.window.showErrorMessage('Overleaf Comments: could not change the file to reject the suggestion.');
+      return;
+    }
+    if (await this.clearSuggestion(ids, docId, 'Clear the rejected suggestion on Overleaf', ' The file was already changed; undo it, or push it and accept the suggestion on Overleaf.')) {
+      vscode.window.setStatusBarMessage('$(check) Suggestion rejected in your file. Save and push to update Overleaf.', 8000);
+    }
+  }
+
+  private async clearSuggestion(ids: string[], docId: string, what: string, hint = ''): Promise<boolean> {
+    this.model.setHandled(ids, true);
+    await this.suggestions.render();
+    const res = await this.enqueue(ids[0], () => this.write(what, (c, pid) => c.acceptChanges(pid, docId, ids), hint));
+    if (!res.ok) {
+      this.model.setHandled(ids, false);
+      await this.suggestions.render();
+    }
+    return res.ok;
   }
 
   dispose(): void {

@@ -10,7 +10,7 @@ export const ANCHOR_LOST = 'Anchor lost (text edited locally)';
 export const NOT_ON_OVERLEAF = /Selected text not found/;
 export const RERENDER_SLACK_MS = 100;
 
-export type Client = Pick<OverleafClient, 'listComments' | 'addComment' | 'postCommentMessage' | 'resolveComment' | 'reopenComment'>;
+export type Client = Pick<OverleafClient, 'listReview' | 'acceptChanges' | 'addComment' | 'postCommentMessage' | 'resolveComment' | 'reopenComment'>;
 /** What VS Code passes to a reply handler (structurally a CommentReply). */
 export interface Reply { thread: vscode.CommentThread; text: string }
 /** An editor thread for an OPEN comment. start/end are the anchor's document offsets, kept current as the file is edited. */

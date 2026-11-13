@@ -1,8 +1,9 @@
-// Loading comments from Overleaf (and the cache), the status bar, and resetting everything.
+// Loading comments and suggestions from Overleaf (and the cache), the status bar, and resetting everything.
 import * as vscode from 'vscode';
 import { Model, parseCache, serializeCache } from './model.ts';
 import type { Session } from './session.ts';
 import type { Threads } from './threads.ts';
+import type { SuggestionThreads } from './suggest.ts';
 import { CACHE_KEY, SetupError, setContext } from './common.ts';
 
 export class Sync implements vscode.Disposable {
@@ -18,8 +19,11 @@ export class Sync implements vscode.Disposable {
     private readonly session: Session,
     private readonly model: Model,
     private readonly threads: Threads,
+    private readonly suggestions: SuggestionThreads,
     private readonly output: vscode.OutputChannel,
   ) {}
+
+  private renderAll = () => Promise.all([this.threads.render(), this.suggestions.render()]);
 
   private time = (ms?: number) => (ms ? new Date(ms) : new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -35,7 +39,7 @@ export class Sync implements vscode.Disposable {
 
   /** Load comments. `quiet`: log problems instead of toasting (startup, focus). `useCache`: first paint from the cache. */
   async refresh({ quiet = false, useCache = true, fetch = true } = {}): Promise<void> {
-    const { session, model, threads, output } = this;
+    const { session, model, output } = this;
     let id: string;
     try {
       id = (await session.needProject()).id;
@@ -48,22 +52,22 @@ export class Sync implements vscode.Disposable {
     if (useCache && model.isEmpty()) {
       const cached = parseCache(this.ctx.workspaceState.get(CACHE_KEY), id);
       if (cached) {
-        model.seed(cached.comments);
+        model.seed(cached.comments, cached.changes);
         this.syncedAt = cached.at;
-        await threads.render().catch(e => output.appendLine(`cache render: ${e}`));
+        await this.renderAll().catch(e => output.appendLine(`cache render: ${e}`));
       }
     }
     if (!fetch) return;
     const ticket = model.nextTicket();
     try {
-      const comments = await (await session.getClient()).listComments(id, { status: 'all' }); // resolved too: the sidebar lists them
-      if (!model.applyFetch(ticket, comments)) return; // a newer fetch already landed
+      const { comments, changes } = await (await session.getClient()).listReview(id, { status: 'all' }); // resolved too: the sidebar lists them
+      if (!model.applyFetch(ticket, comments, changes)) return; // a newer fetch already landed
       this.syncedAt = Date.now();
       this.lastFetch = this.syncedAt;
-      await this.ctx.workspaceState.update(CACHE_KEY, serializeCache(id, comments, this.syncedAt));
+      await this.ctx.workspaceState.update(CACHE_KEY, serializeCache(id, comments, this.syncedAt, changes));
       this.setStatus('synced');
       setContext('loadFailed', false);
-      await threads.render();
+      await this.renderAll();
       this.onFetched?.();
     } catch (e) {
       session.dropClient(); // cookie may have expired; rebuild next time
@@ -84,6 +88,7 @@ export class Sync implements vscode.Disposable {
   async reset(): Promise<void> {
     this.model.reset();
     this.threads.clear();
+    this.suggestions.clear();
     await this.ctx.workspaceState.update(CACHE_KEY, undefined);
     this.statusItem.hide();
     this.session.dropClient();

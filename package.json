@@ -86,6 +86,16 @@
         "command": "overleafComments.discardUnsynced",
         "title": "Discard",
         "icon": "$(trash)"
+      },
+      {
+        "command": "overleafComments.acceptSuggestion",
+        "title": "Accept suggestion",
+        "icon": "$(check)"
+      },
+      {
+        "command": "overleafComments.rejectSuggestion",
+        "title": "Reject suggestion",
+        "icon": "$(close)"
       }
     ],
     "configuration": {
@@ -158,6 +168,14 @@
         {
           "command": "overleafComments.discardUnsynced",
           "when": "false"
+        },
+        {
+          "command": "overleafComments.acceptSuggestion",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.rejectSuggestion",
+          "when": "false"
         }
       ],
       "comments/commentThread/context": [
@@ -192,6 +210,16 @@
           "command": "overleafComments.discardUnsynced",
           "group": "navigation@2",
           "when": "commentController == overleaf && commentThread == unsynced"
+        },
+        {
+          "command": "overleafComments.acceptSuggestion",
+          "group": "navigation@1",
+          "when": "commentController == overleaf && commentThread == suggestion"
+        },
+        {
+          "command": "overleafComments.rejectSuggestion",
+          "group": "navigation@2",
+          "when": "commentController == overleaf && commentThread == suggestion"
         }
       ],
       "view/item/context": [
@@ -209,6 +237,16 @@
           "command": "overleafComments.treeReopen",
           "group": "inline@1",
           "when": "view == overleafComments.threads && viewItem == resolved"
+        },
+        {
+          "command": "overleafComments.acceptSuggestion",
+          "group": "inline@1",
+          "when": "view == overleafComments.threads && viewItem == suggestion"
+        },
+        {
+          "command": "overleafComments.rejectSuggestion",
+          "group": "inline@2",
+          "when": "view == overleafComments.threads && viewItem == suggestion"
         }
       ],
       "view/title": [

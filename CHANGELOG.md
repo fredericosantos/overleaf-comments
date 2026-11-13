@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Suggestions (track changes) appear as threads with Accept / Reject, and in the sidebar: insertions in green, deletions as a red marker, a deletion next to an insertion as "Changed: old to new". Accept only clears the marker on Overleaf (your file already has the text). Reject undoes the change in your local file, for you to push, and clears the marker on Overleaf.
+- "Not synced" comments use VS Code's "unresolved" comment icon.
+
 ## 0.1.0 (preview)
 
 First release.
