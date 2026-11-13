@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import type { ProjectComment } from '@aloth/olcli';
 import { locate, lfView } from './anchor.ts';
 import type { Threads } from './threads.ts';
+import type { SuggestionEntry } from './suggest.ts';
 import { range, workspaceRoot, type Entry } from './common.ts';
 
 export async function reveal(threads: Threads, c: ProjectComment): Promise<void> {
@@ -22,6 +23,13 @@ export async function reveal(threads: Threads, c: ProjectComment): Promise<void>
   const where = range(doc, v.toDoc(a.start), v.toDoc(a.end));
   const editor = await vscode.window.showTextDocument(doc, { selection: where });
   editor.revealRange(where, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+}
+
+/** Take the user to a suggestion and open its thread (Accept/Reject are in its header). */
+export async function revealSuggestion(e: SuggestionEntry): Promise<void> {
+  const editor = await vscode.window.showTextDocument(e.thread.uri, { selection: e.thread.range });
+  editor.revealRange(e.thread.range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+  e.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
 }
 
 /** Open the thread and put the cursor in its reply box, as if the comment icon had been clicked and Reply pressed.

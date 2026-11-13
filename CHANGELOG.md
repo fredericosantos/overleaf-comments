@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Suggestions (track changes) appear as threads with Accept / Reject, and in the sidebar: insertions in green, deletions as a red marker, a deletion next to an insertion as "Changed: old to new". Accept only clears the marker on Overleaf (your file already has the text). Reject undoes the change in your local file, for you to push, and clears the marker on Overleaf.
+- Reviewing mode (the pencil button in the Overleaf Comments panel): what you type becomes local suggestions, kept in the file and marked "Not synced". Once you push, each one is turned into a real suggestion on Overleaf (the pushed text is undone and redone as tracked; the text stays the same, so the next pull is clean).
+- One pipeline for comments and suggestions: whatever waits for a push (not-synced comments, local suggestions) is kept across reloads and sent after every refresh; a push (a change of the remote-tracking refs) triggers a refresh.
+- Comments and suggestions whose text is not in your local file are no longer drawn at a guessed place: they are listed in the sidebar as "not in your file (git pull?)".
+- "Not synced" comments and suggestions use VS Code's "unresolved" comment icon.
+
 ## 0.1.0 (preview)
 
 First release.

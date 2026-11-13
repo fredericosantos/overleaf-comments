@@ -68,7 +68,7 @@ export async function run(): Promise<void> {
   // 7-9. write path with a fake client: reply, new comment (anchored by occurrence), resolve
   const calls: unknown[][] = [];
   api.useClient({
-    listComments: async () => [],
+    listReview: async () => ({ comments: [], changes: [] }),
     addComment: async (id: string, o: unknown) => { calls.push(['add', id, o]); return { ...comment('T9', 'x', 0) }; },
     postCommentMessage: async (id: string, t: string, c: string) => { calls.push(['reply', id, t, c]); return null; },
     resolveComment: async (id: string, t: string) => { calls.push(['resolve', id, t]); return comment(t, 'x', 0); },
@@ -175,7 +175,7 @@ export async function run(): Promise<void> {
     const hold = () => { gate = new Promise<void>(r => { open = r; }); };
     const at = () => doc.getText().indexOf('gamma delta');
     api.useClient({
-      listComments: async () => [{ ...comment('T1', 'gamma delta', at()), messages: server.messages, resolved: server.resolved }],
+      listReview: async () => ({ comments: [{ ...comment('T1', 'gamma delta', at()), messages: server.messages, resolved: server.resolved }], changes: [] }),
       addComment: async () => { await gate; return { ...comment('T9', 'x', 0) }; },
       postCommentMessage: async (_id: string, _t: string, content: string) => { await gate; if (fail) throw new Error('boom'); server.messages = [...server.messages, msg(content)]; return null; },
       resolveComment: async () => { await gate; if (fail) throw new Error('boom'); server.resolved = true; return comment('T1', 'x', 0); },
@@ -240,7 +240,7 @@ export async function run(): Promise<void> {
   // text that is not on Overleaf yet: no alarm, no push; the comment stays in its thread as "Not synced" until it can be added
   let attempts = 0;
   api.useClient({
-    listComments: async () => [],
+    listReview: async () => ({ comments: [], changes: [] }),
     addComment: async (id: string, o: unknown) => {
       attempts++;
       if (attempts <= 2) throw new Error('Selected text not found in chap/f10.tex'); // the first two tries: the text is not on Overleaf yet

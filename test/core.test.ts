@@ -232,3 +232,106 @@ test('KNOWN LIMIT: repeated text + a pull that rewrites the commented copy: it m
   assert.equal(r.found, true); // nearest remaining copy: the comment now sits on a DIFFERENT line than before
   assert.notEqual(r.line, 2);
 });
+
+import { groupChanges, locateSuggestion, verbOf } from '../src/suggestions.ts';
+import type { TrackedChange } from '@aloth/olcli';
+
+// The live example: "memory as a function of the population size and" with tracked changes, as Overleaf returned it.
+const LIVE = 'memory as a  population-size something  and of the';
+const ch = (id: string, kind: 'insert' | 'delete', text: string, position: number): TrackedChange => {
+  const end = kind === 'insert' ? position + text.length : position;
+  return { id, docId: 'd', path: 'main.tex', position, line: 1, kind, text, before: LIVE.slice(Math.max(0, position - 40), position), after: LIVE.slice(end, end + 40), userId: 'u', user: { id: 'u', first_name: 'Ada', last_name: 'L' } };
+};
+const liveChanges = [ch('c1', 'delete', 'function of the', 12), ch('c2', 'insert', 'population-size something', 13), ch('c3', 'delete', 'population', 38), ch('c4', 'delete', 'size', 39)];
+
+test('groupChanges: a deletion right after an insertion is one "Changed" suggestion', () => {
+  const g = groupChanges(liveChanges);
+  assert.deepEqual(g.map(s => [verbOf(s), s.ids, s.deleted, s.inserted, s.author]), [
+    ['Deleted', ['c1'], 'function of the', '', 'Ada L'],
+    ['Changed', ['c2', 'c3'], 'population', 'population-size something', 'Ada L'],
+    ['Deleted', ['c4'], 'size', '', 'Ada L'],
+  ]);
+});
+
+test('locateSuggestion: found by its context after local edits, deletions are zero-width', () => {
+  const [del, changed] = groupChanges(liveChanges);
+  assert.deepEqual(locateSuggestion(LIVE, changed), { start: 13, end: 38, found: true });
+  const edited = `NEW TEXT ${LIVE}`; // the user typed above it: Overleaf's offset is now 9 off
+  assert.deepEqual(locateSuggestion(edited, changed), { start: 22, end: 47, found: true });
+  assert.deepEqual(locateSuggestion(edited, del), { start: 21, end: 21, found: true });
+  // the context was edited, the inserted text was not: still found by the inserted text
+  assert.equal(locateSuggestion('xx population-size something yy', changed).found, true);
+  assert.equal(locateSuggestion('nothing like it', del).found, false);
+});
+
+test('model: accepted/rejected suggestions stay hidden until the server drops them; cache keeps changes', () => {
+  const m = new Model();
+  m.applyFetch(m.nextTicket(), [], liveChanges);
+  assert.equal(m.suggestions().length, 3);
+  m.setHandled(['c2', 'c3'], true);
+  assert.deepEqual(m.suggestions().map(s => s.id), ['c1', 'c4']);
+  m.setHandled(['c2', 'c3'], false); // the write failed: shown again
+  assert.equal(m.suggestions().length, 3);
+  m.setHandled(['c2', 'c3'], true);
+  m.applyFetch(m.nextTicket(), [], liveChanges.filter(c => c.id !== 'c2' && c.id !== 'c3'));
+  assert.deepEqual(m.suggestions().map(s => s.id), ['c1', 'c4']);
+  m.applyFetch(m.nextTicket(), [], liveChanges); // Overleaf still lists them (the accept did not take): back after the TTL
+  m.setHandled(['c2', 'c3'], true, 0);
+  assert.equal(m.suggestions(INTENT_TTL_MS - 1).length, 2);
+  assert.equal(m.suggestions(INTENT_TTL_MS).length, 3);
+  const file = serializeCache('P1', [], 1, liveChanges);
+  assert.equal(parseCache(file, 'P1')?.changes.length, 4);
+  assert.equal(parseCache({ ...file, changes: [{ id: 'x' }] }, 'P1'), undefined);
+  assert.equal(parseCache({ v: 1, projectId: 'P1', at: 1, comments: [] }, 'P1'), undefined); // a v1 cache: refetch
+});
+
+import { applyEdit, store, restore, type LocalChange, type Edit } from '../src/review.ts';
+
+/** Type a sequence of edits into `text` (Reviewing on unless said otherwise); returns the text and the suggestions. */
+function review(text: string, edits: (Edit & { off?: boolean })[], start: LocalChange[] = []) {
+  let n = 0;
+  let list = start;
+  for (const e of edits) {
+    list = applyEdit(list, text, e, !e.off, () => `L${++n}`);
+    text = text.slice(0, e.offset) + e.text + text.slice(e.offset + e.length);
+  }
+  return { text, list: list.map(c => [c.kind, c.at, c.text]) };
+}
+
+test('review: typing makes one insertion; deleting your own typing just shrinks it', () => {
+  assert.deepEqual(review('ab', [{ offset: 1, length: 0, text: 'X' }, { offset: 2, length: 0, text: 'Y' }]), { text: 'aXYb', list: [['insert', 1, 'XY']] });
+  assert.deepEqual(review('ab', [{ offset: 1, length: 0, text: 'XY' }, { offset: 2, length: 1, text: '' }]), { text: 'aXb', list: [['insert', 1, 'X']] });
+  assert.deepEqual(review('ab', [{ offset: 1, length: 0, text: 'X' }, { offset: 1, length: 1, text: '' }]), { text: 'ab', list: [] });
+});
+
+test('review: backspacing other text makes one marker; typing there makes "Changed"', () => {
+  // "the old cat": backspace "old" one letter at a time, then type "new"
+  const r = review('the old cat', [{ offset: 6, length: 1, text: '' }, { offset: 5, length: 1, text: '' }, { offset: 4, length: 1, text: '' }, { offset: 4, length: 0, text: 'new' }]);
+  assert.deepEqual(r, { text: 'the new cat', list: [['insert', 4, 'new'], ['delete', 7, 'old']] });
+  // select "old" and type over it: the same result
+  assert.deepEqual(review('the old cat', [{ offset: 4, length: 3, text: 'new' }]), r);
+});
+
+test('review: forward delete merges too; undo (typing the deleted text back) removes the marker', () => {
+  assert.deepEqual(review('abcd', [{ offset: 1, length: 1, text: '' }, { offset: 1, length: 1, text: '' }]), { text: 'ad', list: [['delete', 1, 'bc']] });
+  assert.deepEqual(review('abcd', [{ offset: 1, length: 2, text: '' }, { offset: 1, length: 0, text: 'bc' }]), { text: 'abcd', list: [] });
+});
+
+test('review: a deletion across your own insertion keeps only the other text in the marker', () => {
+  // "aXXb" where XX is our insertion; delete "XXb" -> only "b" was real text
+  const r = review('ab', [{ offset: 1, length: 0, text: 'XX' }, { offset: 1, length: 3, text: '' }]);
+  assert.deepEqual(r, { text: 'a', list: [['delete', 1, 'b']] });
+});
+
+test('review: edits with Reviewing off only move the suggestions', () => {
+  const r = review('abc', [{ offset: 2, length: 0, text: 'X' }, { offset: 0, length: 0, text: '__', off: true }, { offset: 0, length: 1, text: '', off: true }]);
+  assert.deepEqual(r, { text: '_abXc', list: [['insert', 3, 'X']] });
+});
+
+test('review: stored changes are found again after the text around them moved', () => {
+  const text = 'intro. the new cat sat.';
+  const list: LocalChange[] = [{ id: 'a', kind: 'insert', at: 11, text: 'new' }, { id: 'b', kind: 'delete', at: 14, text: 'old' }];
+  const moved = `NEW FIRST LINE\n${text}`;
+  assert.deepEqual(restore(store(list, text), moved).map(c => [c.kind, c.at, c.text]), [['insert', 26, 'new'], ['delete', 29, 'old']]);
+  assert.deepEqual(restore(store(list, text), 'something else entirely'), []);
+});

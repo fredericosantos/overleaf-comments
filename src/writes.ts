@@ -1,12 +1,14 @@
-// Everything that changes things on Overleaf: replies, new comments (with the commit-and-push offer), resolve/reopen.
+// Everything that changes things on Overleaf: replies, new comments, resolve/reopen, accepting/rejecting suggestions.
 // Each is optimistic: the UI changes at once, and is rolled back (with the error shown) if Overleaf refuses.
 import * as vscode from 'vscode';
-import { anchorAt } from './anchor.ts';
+import { anchorAt, lfView } from './anchor.ts';
 import { INTENT_TTL_MS, type Model } from './model.ts';
 import type { Session } from './session.ts';
 import type { Sync } from './sync.ts';
 import type { Threads } from './threads.ts';
-import { Cancelled, NOT_ON_OVERLEAF, RERENDER_SLACK_MS, SYNCING, type Client, type NewCommentArgs, type Reply, type Written } from './common.ts';
+import type { SuggestionThreads } from './suggest.ts';
+import { LOCAL, type Reviewing } from './reviewing.ts';
+import { Cancelled, NOT_ON_OVERLEAF, RERENDER_SLACK_MS, SYNCING, UNSYNCED_KEY, range, type Client, type NewCommentArgs, type Reply, type Written } from './common.ts';
 
 const optimistic = (text: string): vscode.Comment => ({ author: { name: 'You' }, body: new vscode.MarkdownString(text), mode: vscode.CommentMode.Preview, label: SYNCING });
 
@@ -19,13 +21,53 @@ export class Writes implements vscode.Disposable {
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(
+    private readonly ctx: vscode.ExtensionContext,
     private readonly session: Session,
     private readonly model: Model,
     private readonly threads: Threads,
+    private readonly suggestions: SuggestionThreads,
+    private readonly reviewing: Reviewing,
     private readonly sync: Sync,
     private readonly output: vscode.OutputChannel,
   ) {
-    sync.onFetched = () => void this.retryUnsynced();
+    sync.onFetched = () => void this.retryPending();
+  }
+
+  /** Not-synced comments survive a reload: keep them (file and what to send) in workspace storage. */
+  private saveUnsynced(): void {
+    if (this.restoring) return; // restoreUnsynced saves once at the end
+    const shown = [...this.unsynced.values()].map(x => ({ uri: x.uri.toString(), args: x.args }));
+    void this.ctx.workspaceState.update(UNSYNCED_KEY, [...shown, ...this.unrestored]);
+  }
+  private restoring = false;
+  /** Saved not-synced comments whose file could not be opened: kept for the next start, so their text is never lost. */
+  private unrestored: { uri: string; args: NewCommentArgs }[] = [];
+
+  /** At startup: draw the not-synced comments of the last session again, on their text if it is still there. */
+  async restoreUnsynced(): Promise<void> {
+    const saved = this.ctx.workspaceState.get<{ uri: string; args: NewCommentArgs }[]>(UNSYNCED_KEY) ?? [];
+    const kept: typeof saved = [];
+    this.restoring = true;
+    for (const { uri, args } of saved) {
+      try {
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+        const v = lfView(doc.getText());
+        let at = -1;
+        for (let n = 0, i = v.lf.indexOf(args.selectedText); i !== -1; i = v.lf.indexOf(args.selectedText, i + args.selectedText.length)) {
+          at = i; // the occurrence the user commented on, or the last one there is
+          if (++n === args.occurrence) break;
+        }
+        // ponytail: text gone = the comment is shown at the top of the file (it keeps Retry/Discard); re-anchoring UI if this happens often.
+        const where = at === -1 ? range(doc, 0, 0) : range(doc, v.toDoc(at), v.toDoc(at + args.selectedText.length));
+        this.markUnsynced(doc, this.threads.controller.createCommentThread(doc.uri, where, []), args);
+      } catch (e) {
+        kept.push({ uri, args });
+        this.output.appendLine(`restore unsynced comment in ${uri}: ${e}`);
+      }
+    }
+    this.restoring = false;
+    this.unrestored = kept;
+    this.saveUnsynced();
   }
 
   /** Resolves when every background send has finished (deactivate waits for it; so do the tests). */
@@ -175,10 +217,14 @@ export class Writes implements vscode.Disposable {
     temp.comments = [{ ...optimistic(args.content), label: 'Not synced' }];
     temp.label = "Text not on Overleaf yet · it syncs once you've pushed it";
     temp.contextValue = 'unsynced';
+    // The only per-thread gutter icon stable API offers: "unresolved" swaps the plain bubble for the bubble-with-dot.
+    // ponytail: the "pending" (comment-draft) icon needs the proposed commentsDraftState API, which Marketplace builds can't use.
+    temp.state = vscode.CommentThreadState.Unresolved;
     temp.canReply = false;
     temp.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
     this.unsynced.set(temp, { uri: doc.uri, args });
     this.threads.addUnsynced(temp, doc, args.selectedText);
+    this.saveUnsynced();
   }
 
   /** "Retry sync" (and the automatic retry): try once more to add the comment. */
@@ -187,6 +233,7 @@ export class Writes implements vscode.Disposable {
     if (!item) return Promise.resolve();
     this.unsynced.delete(temp);
     this.threads.removeUnsynced(temp);
+    this.saveUnsynced();
     return this.track(Promise.resolve(vscode.workspace.openTextDocument(item.uri)).then(doc => this.addNew(doc, temp, item.args)));
   }
 
@@ -195,18 +242,40 @@ export class Writes implements vscode.Disposable {
     if (this.unsynced.delete(temp)) {
       this.threads.removeUnsynced(temp);
       temp.dispose();
+      this.saveUnsynced();
     }
   }
 
-  /** After each successful fetch (e.g. once the user has pushed): retry the unsynced comments, one at a time. */
-  private async retryUnsynced(): Promise<void> {
-    if (this.retrying || !this.unsynced.size) return;
+  /** After each successful fetch (e.g. once the user has pushed): send what is waiting for a push, one at a time:
+   * not-synced comments, then local suggestions. */
+  private async retryPending(): Promise<void> {
+    if (this.retrying) return;
     this.retrying = true; // the retries fetch again themselves: do not start another round from inside this one
     try {
       for (const temp of [...this.unsynced.keys()]) await this.retrySync(temp);
+      await this.sendLocalSuggestions();
     } finally {
       this.retrying = false;
     }
+  }
+
+  /** Local suggestions whose text is on Overleaf now (pushed) become suggestions there. Quiet: this runs after every
+   * fetch, and "not pushed yet" is the normal answer. */
+  private async sendLocalSuggestions(): Promise<void> {
+    const files = this.reviewing.pending();
+    if (!files.length) return;
+    let sent = 0;
+    try {
+      const { id } = await this.session.needProject();
+      const client = await this.session.getClient();
+      for (const f of files) {
+        const results = await client.suggestChanges(id, f.path, f.edits);
+        results.forEach((r, i) => { if (r === 'done') { this.reviewing.drop(f.items[i]); sent++; } });
+      }
+    } catch (e) {
+      this.output.appendLine(`send local suggestions: ${e}`);
+    }
+    if (sent) await this.sync.refresh({ quiet: true, useCache: false });
   }
 
   /** Resolve/reopen. The user's intent is shown at once and kept until the server agrees (or INTENT_TTL_MS passes), so a
@@ -224,6 +293,57 @@ export class Writes implements vscode.Disposable {
       model.clearIntent(threadId, resolved);
       await threads.render();
     }
+  }
+
+  /** Accept: Overleaf keeps the change and drops the marker. The local file already has the accepted text. */
+  async acceptSuggestion(id: string): Promise<void> {
+    if (id.startsWith(LOCAL)) { const x = this.reviewing.byId(id); if (x) this.reviewing.drop(x); return; } // keep the text, forget the suggestion
+    const e = this.suggestions.byId(id);
+    if (e) await this.clearSuggestion(e.s.ids, e.s.docId, 'Accept suggestion');
+  }
+
+  /** Reject: undo the change in the LOCAL file (the user pushes it as usual), then accept on Overleaf, which only clears
+   * the marker there. No edit is sent to Overleaf's text, so a later push or pull cannot conflict with it. */
+  async rejectSuggestion(id: string): Promise<void> {
+    if (id.startsWith(LOCAL)) {
+      const x = this.reviewing.byId(id);
+      if (x && !(await this.reviewing.reject(x))) void vscode.window.showErrorMessage('Overleaf Comments: could not change the file to reject the suggestion.');
+      return;
+    }
+    const e = this.suggestions.byId(id);
+    if (!e) return;
+    const doc = await vscode.workspace.openTextDocument(e.thread.uri);
+    const v = lfView(doc.getText());
+    if (!e.found || v.lf.slice(v.fromDoc(e.start), v.fromDoc(e.end)) !== e.s.inserted) {
+      void vscode.window.showErrorMessage('Overleaf Comments: the suggested text is not where it should be in your file (edited locally?). git pull, then try again.');
+      return;
+    }
+    const eol = doc.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(doc.uri, range(doc, e.start, e.end), e.s.deleted.replace(/\n/g, eol));
+    const { ids, docId } = e.s;
+    this.model.setHandled(ids, true);
+    await this.suggestions.render(); // the thread goes away before the text changes under it
+    if (!(await vscode.workspace.applyEdit(edit))) {
+      this.model.setHandled(ids, false);
+      await this.suggestions.render();
+      void vscode.window.showErrorMessage('Overleaf Comments: could not change the file to reject the suggestion.');
+      return;
+    }
+    if (await this.clearSuggestion(ids, docId, 'Clear the rejected suggestion on Overleaf', ' The file was already changed; undo it, or push it and accept the suggestion on Overleaf.')) {
+      vscode.window.setStatusBarMessage('$(check) Suggestion rejected in your file. Save and push to update Overleaf.', 8000);
+    }
+  }
+
+  private async clearSuggestion(ids: string[], docId: string, what: string, hint = ''): Promise<boolean> {
+    this.model.setHandled(ids, true);
+    await this.suggestions.render();
+    const res = await this.enqueue(ids[0], () => this.write(what, (c, pid) => c.acceptChanges(pid, docId, ids), hint));
+    if (!res.ok) {
+      this.model.setHandled(ids, false);
+      await this.suggestions.render();
+    }
+    return res.ok;
   }
 
   dispose(): void {

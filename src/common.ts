@@ -4,13 +4,14 @@ import type { OverleafClient, ProjectComment } from '@aloth/olcli';
 
 export const COOKIE_KEY = 'overleafComments.cookie';
 export const CACHE_KEY = 'overleafComments.cache';
+export const UNSYNCED_KEY = 'overleafComments.unsyncedComments';
 export const SYNCING = 'Syncing…';
 export const ANCHOR_LOST = 'Anchor lost (text edited locally)';
 /** The message olcli's addComment throws when the text is not in Overleaf's copy of the file. */
 export const NOT_ON_OVERLEAF = /Selected text not found/;
 export const RERENDER_SLACK_MS = 100;
 
-export type Client = Pick<OverleafClient, 'listComments' | 'addComment' | 'postCommentMessage' | 'resolveComment' | 'reopenComment'>;
+export type Client = Pick<OverleafClient, 'listReview' | 'acceptChanges' | 'suggestChanges' | 'addComment' | 'postCommentMessage' | 'resolveComment' | 'reopenComment'>;
 /** What VS Code passes to a reply handler (structurally a CommentReply). */
 export interface Reply { thread: vscode.CommentThread; text: string }
 /** An editor thread for an OPEN comment. start/end are the anchor's document offsets, kept current as the file is edited. */

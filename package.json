@@ -86,6 +86,26 @@
         "command": "overleafComments.discardUnsynced",
         "title": "Discard",
         "icon": "$(trash)"
+      },
+      {
+        "command": "overleafComments.acceptSuggestion",
+        "title": "Accept suggestion",
+        "icon": "$(check)"
+      },
+      {
+        "command": "overleafComments.rejectSuggestion",
+        "title": "Reject suggestion",
+        "icon": "$(close)"
+      },
+      {
+        "command": "overleafComments.startReviewing",
+        "title": "Overleaf Comments: Editing (click to switch to Reviewing)",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "overleafComments.stopReviewing",
+        "title": "Overleaf Comments: Reviewing (click to switch to Editing)",
+        "icon": "$(comment-draft)"
       }
     ],
     "configuration": {
@@ -158,6 +178,22 @@
         {
           "command": "overleafComments.discardUnsynced",
           "when": "false"
+        },
+        {
+          "command": "overleafComments.acceptSuggestion",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.rejectSuggestion",
+          "when": "false"
+        },
+        {
+          "command": "overleafComments.startReviewing",
+          "when": "!overleafComments.reviewing"
+        },
+        {
+          "command": "overleafComments.stopReviewing",
+          "when": "overleafComments.reviewing"
         }
       ],
       "comments/commentThread/context": [
@@ -192,6 +228,16 @@
           "command": "overleafComments.discardUnsynced",
           "group": "navigation@2",
           "when": "commentController == overleaf && commentThread == unsynced"
+        },
+        {
+          "command": "overleafComments.acceptSuggestion",
+          "group": "navigation@1",
+          "when": "commentController == overleaf && commentThread == suggestion"
+        },
+        {
+          "command": "overleafComments.rejectSuggestion",
+          "group": "navigation@2",
+          "when": "commentController == overleaf && commentThread == suggestion"
         }
       ],
       "view/item/context": [
@@ -209,9 +255,29 @@
           "command": "overleafComments.treeReopen",
           "group": "inline@1",
           "when": "view == overleafComments.threads && viewItem == resolved"
+        },
+        {
+          "command": "overleafComments.acceptSuggestion",
+          "group": "inline@1",
+          "when": "view == overleafComments.threads && viewItem == suggestion"
+        },
+        {
+          "command": "overleafComments.rejectSuggestion",
+          "group": "inline@2",
+          "when": "view == overleafComments.threads && viewItem == suggestion"
         }
       ],
       "view/title": [
+        {
+          "command": "overleafComments.startReviewing",
+          "group": "navigation@0",
+          "when": "view == overleafComments.threads && !overleafComments.reviewing"
+        },
+        {
+          "command": "overleafComments.stopReviewing",
+          "group": "navigation@0",
+          "when": "view == overleafComments.threads && overleafComments.reviewing"
+        },
         {
           "command": "overleafComments.refresh",
           "group": "navigation",
