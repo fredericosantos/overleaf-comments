@@ -96,6 +96,16 @@
         "command": "overleafComments.rejectSuggestion",
         "title": "Reject suggestion",
         "icon": "$(close)"
+      },
+      {
+        "command": "overleafComments.startReviewing",
+        "title": "Overleaf Comments: Editing (click to switch to Reviewing)",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "overleafComments.stopReviewing",
+        "title": "Overleaf Comments: Reviewing (click to switch to Editing)",
+        "icon": "$(comment-draft)"
       }
     ],
     "configuration": {
@@ -176,6 +186,14 @@
         {
           "command": "overleafComments.rejectSuggestion",
           "when": "false"
+        },
+        {
+          "command": "overleafComments.startReviewing",
+          "when": "!overleafComments.reviewing"
+        },
+        {
+          "command": "overleafComments.stopReviewing",
+          "when": "overleafComments.reviewing"
         }
       ],
       "comments/commentThread/context": [
@@ -250,6 +268,16 @@
         }
       ],
       "view/title": [
+        {
+          "command": "overleafComments.startReviewing",
+          "group": "navigation@0",
+          "when": "view == overleafComments.threads && !overleafComments.reviewing"
+        },
+        {
+          "command": "overleafComments.stopReviewing",
+          "group": "navigation@0",
+          "when": "view == overleafComments.threads && overleafComments.reviewing"
+        },
         {
           "command": "overleafComments.refresh",
           "group": "navigation",

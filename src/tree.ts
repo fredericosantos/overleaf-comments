@@ -3,6 +3,10 @@ import * as vscode from 'vscode';
 import type { ProjectComment, CommentMessage } from '@aloth/olcli';
 import { authorOf } from './text.ts';
 import { verbOf, type Suggestion } from './suggestions.ts';
+import { LOCAL } from './reviewing.ts';
+
+/** Shown for an open comment or suggestion whose text the local file does not have (yet). */
+const NOT_IN_FILE = 'not in your file (git pull?)';
 
 export type Node =
   | { kind: 'file'; path: string; comments: ProjectComment[]; suggestions: Suggestion[] }
@@ -56,9 +60,11 @@ export class CommentsTree implements vscode.TreeDataProvider<Node>, vscode.Dispo
     if (n.kind === 'thread') {
       const c = n.c;
       const replies = c.messages.length - 1;
-      const line = (this.liveLine(c.threadId) ?? c.line - 1) + 1;
+      const live = this.liveLine(c.threadId);
+      const line = (live ?? c.line - 1) + 1;
       const it = new vscode.TreeItem(firstText(c).split('\n')[0].slice(0, 60), vscode.TreeItemCollapsibleState.Collapsed);
-      it.description = [`L${line}`, authorOf(c.messages[0]), replies > 0 ? `${replies} repl${replies === 1 ? 'y' : 'ies'}` : '', c.resolved ? 'resolved' : ''].filter(Boolean).join(' · ');
+      const missing = !c.resolved && live === undefined ? NOT_IN_FILE : '';
+      it.description = [`L${line}`, authorOf(c.messages[0]), replies > 0 ? `${replies} repl${replies === 1 ? 'y' : 'ies'}` : '', c.resolved ? 'resolved' : '', missing].filter(Boolean).join(' · ');
       it.tooltip = `${c.selectedText}\n\n${c.messages.map(m => `${authorOf(m)}: ${m.content}`).join('\n')}`;
       it.iconPath = c.resolved ? new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed')) : new vscode.ThemeIcon('comment');
       it.contextValue = c.resolved ? 'resolved' : 'open';
@@ -69,7 +75,9 @@ export class CommentsTree implements vscode.TreeDataProvider<Node>, vscode.Dispo
       const s = n.s;
       const what = s.inserted && s.deleted ? `${s.deleted} → ${s.inserted}` : s.inserted || s.deleted;
       const it = new vscode.TreeItem(`${verbOf(s)}: ${what.split('\n')[0].slice(0, 60)}`);
-      it.description = [`L${(this.liveLine(s.id) ?? s.line - 1) + 1}`, s.author].join(' · ');
+      const live = this.liveLine(s.id);
+      const local = s.id.startsWith(LOCAL);
+      it.description = [`L${(live ?? s.line - 1) + 1}`, s.author, local ? 'not synced' : live === undefined ? NOT_IN_FILE : ''].filter(Boolean).join(' · ');
       it.tooltip = `${verbOf(s)} by ${s.author}${s.deleted ? `\n\nDeleted: ${s.deleted}` : ''}${s.inserted ? `\n\nAdded: ${s.inserted}` : ''}`;
       it.iconPath = new vscode.ThemeIcon('edit');
       it.contextValue = 'suggestion';

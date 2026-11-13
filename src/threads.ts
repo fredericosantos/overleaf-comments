@@ -168,6 +168,7 @@ export class Threads implements vscode.Disposable {
         start = v.toDoc(a.start);
         end = v.toDoc(a.end);
       }
+      if (!found) { prev?.thread.dispose(); continue; } // not in the local file (git pull first): the sidebar lists it
       const where = range(doc, start, end);
       const thread = prev?.thread ?? this.controller.createCommentThread(uri, where, this.withPending(c));
       if (prev) {
@@ -177,7 +178,7 @@ export class Threads implements vscode.Disposable {
       }
       thread.canReply = true;
       thread.contextValue = this.contextValue(c);
-      thread.label = found ? undefined : ANCHOR_LOST;
+      thread.label = undefined;
       next.push({ thread, comment: c, start, end });
       const waiting = this.lingering.get(c.threadId);
       if (waiting) {

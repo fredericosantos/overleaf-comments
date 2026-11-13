@@ -1,10 +1,15 @@
 // The editor side of suggestions: one comment thread per suggestion (Accept/Reject in its header), the inserted text
-// in green and a red marker where text was deleted, followed through local edits like comments are.
+// in green and a red marker where text was deleted. Overleaf's suggestions are followed through local edits like
+// comments are, and shown only when the file has their text (git pull first); local ones (Reviewing mode) come from
+// Reviewing and are marked "Not synced" until they are on Overleaf.
 import * as vscode from 'vscode';
 import { lfView, shiftAnchor } from './anchor.ts';
 import { locateSuggestion, verbOf, type Suggestion } from './suggestions.ts';
 import type { Model } from './model.ts';
+import type { LocalSuggestion } from './reviewing.ts';
 import { ANCHOR_LOST, range, workspaceRoot } from './common.ts';
+
+export const LOCAL_LABEL = "Not synced · it becomes a suggestion on Overleaf once you've pushed it";
 
 /** A drawn suggestion. start/end: document offsets of the inserted text (equal for a deletion), kept current. */
 export interface SuggestionEntry { thread: vscode.CommentThread; s: Suggestion; start: number; end: number; found: boolean }
@@ -19,19 +24,59 @@ function body(s: Suggestion): vscode.MarkdownString {
 }
 
 const signature = (s: Suggestion) => `${s.ids.join(',')}\u0000${s.inserted}\u0000${s.deleted}`;
+const asComment = (s: Suggestion): vscode.Comment => ({ author: { name: s.author }, body: body(s), mode: vscode.CommentMode.Preview, timestamp: s.timestamp ? new Date(s.timestamp) : undefined });
 
 export class SuggestionThreads implements vscode.Disposable {
+  /** Overleaf's suggestions. */
   entries: SuggestionEntry[] = [];
+  /** Local ones (Reviewing mode), not on Overleaf yet. */
+  localEntries: SuggestionEntry[] = [];
   private renderGen = 0;
   private readonly insertedText = vscode.window.createTextEditorDecorationType({ backgroundColor: 'rgba(46,160,67,0.25)', borderRadius: '2px' });
   // A zero-width space with a red left border: a thin bar where text was deleted, without shifting the text much.
   private readonly deletedMark = vscode.window.createTextEditorDecorationType({ before: { contentText: '​', border: '0 0 0 2px solid rgba(248,81,73,0.9)' } });
 
   /** `onChange`: the set or position of suggestions changed (the sidebar redraws). */
-  constructor(private readonly controller: vscode.CommentController, private readonly model: Model, private readonly output: vscode.OutputChannel, private readonly onChange: () => void) {}
+  constructor(
+    private readonly controller: vscode.CommentController,
+    private readonly model: Model,
+    private readonly local: () => LocalSuggestion[],
+    private readonly output: vscode.OutputChannel,
+    private readonly onChange: () => void,
+  ) {}
 
-  byId = (id: string) => this.entries.find(e => e.s.id === id);
-  byThread = (t: vscode.CommentThread) => this.entries.find(e => e.thread === t);
+  private all = () => [...this.entries, ...this.localEntries];
+  byId = (id: string) => this.all().find(e => e.s.id === id);
+  byThread = (t: vscode.CommentThread) => this.all().find(e => e.thread === t);
+
+  /** Redraw the local suggestions from Reviewing (cheap: it runs on every keystroke in Reviewing mode). */
+  renderLocal(): void {
+    const old = new Map(this.localEntries.map(e => [e.s.id, e]));
+    const next: SuggestionEntry[] = [];
+    for (const x of this.local()) {
+      const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === x.uri.toString());
+      if (!doc) continue;
+      const where = range(doc, x.start, x.end);
+      let e = old.get(x.s.id);
+      old.delete(x.s.id);
+      if (e && e.thread.uri.toString() !== x.uri.toString()) { e.thread.dispose(); e = undefined; }
+      const thread = e?.thread ?? this.controller.createCommentThread(x.uri, where, []);
+      if (!e) {
+        thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
+        thread.canReply = false;
+        thread.contextValue = 'suggestion';
+        thread.label = LOCAL_LABEL;
+        thread.state = vscode.CommentThreadState.Unresolved; // the same "not synced" icon as comments waiting for a push
+      }
+      if (!e || signature(e.s) !== signature(x.s)) thread.comments = [asComment(x.s)];
+      if (!thread.range.isEqual(where)) thread.range = where;
+      next.push({ thread, s: x.s, start: x.start, end: x.end, found: true });
+    }
+    old.forEach(e => e.thread.dispose());
+    this.localEntries = next;
+    this.apply();
+    this.onChange();
+  }
 
   async render(): Promise<void> {
     const root = workspaceRoot();
@@ -63,10 +108,11 @@ export class SuggestionThreads implements vscode.Disposable {
         start = v.toDoc(a.start);
         end = v.toDoc(a.end);
       }
+      if (!found) { prev?.thread.dispose(); continue; } // not in the local file (git pull first): the sidebar lists it
       const where = range(doc, start, end);
       const thread = prev?.thread ?? this.controller.createCommentThread(doc.uri, where, []);
       if (!prev) {
-        thread.comments = [{ author: { name: s.author }, body: body(s), mode: vscode.CommentMode.Preview, timestamp: s.timestamp ? new Date(s.timestamp) : undefined }];
+        thread.comments = [asComment(s)];
         thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
       } else if (!thread.range.isEqual(where)) thread.range = where;
       thread.canReply = false;
@@ -83,7 +129,7 @@ export class SuggestionThreads implements vscode.Disposable {
   /** Redraw the green insertions and red deletion markers in every visible editor. */
   apply(): void {
     for (const editor of vscode.window.visibleTextEditors) {
-      const mine = this.entries.filter(e => e.found && e.thread.uri.toString() === editor.document.uri.toString());
+      const mine = this.all().filter(e => e.found && e.thread.uri.toString() === editor.document.uri.toString());
       editor.setDecorations(this.insertedText, mine.filter(e => e.end > e.start).map(e => e.thread.range));
       // The deleted text was where the insertion ends (or, with no insertion, at the point itself).
       editor.setDecorations(this.deletedMark, mine.filter(e => e.s.deleted).map(e => new vscode.Range(e.thread.range.end, e.thread.range.end)));
@@ -92,7 +138,7 @@ export class SuggestionThreads implements vscode.Disposable {
 
   /** Same as comments: a click elsewhere in the text closes open suggestions. */
   collapseOutside(uri: vscode.Uri, selection: vscode.Selection): void {
-    for (const x of this.entries) {
+    for (const x of this.all()) {
       if (x.thread.uri.toString() !== uri.toString() || x.thread.range.intersection(selection)) continue;
       x.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
       x.thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
@@ -134,7 +180,7 @@ export class SuggestionThreads implements vscode.Disposable {
   }
 
   dispose(): void {
-    this.entries.forEach(e => e.thread.dispose());
+    this.all().forEach(e => e.thread.dispose());
     this.insertedText.dispose();
     this.deletedMark.dispose();
   }
