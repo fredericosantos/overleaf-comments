@@ -6,6 +6,9 @@ import type { Threads } from './threads.ts';
 import type { SuggestionThreads } from './suggest.ts';
 import { CACHE_KEY, SetupError, setContext } from './common.ts';
 
+/** Text around each suggestion to ask for: enough to find it again after local edits (suggestions.ts uses up to 16). */
+const SURROUNDING = 40;
+
 export class Sync implements vscode.Disposable {
   /** When the last fetch finished (0 = none yet); the focus refresh and its back-off look at it. */
   lastFetch = 0;
@@ -60,7 +63,7 @@ export class Sync implements vscode.Disposable {
     if (!fetch) return;
     const ticket = model.nextTicket();
     try {
-      const { comments, changes } = await (await session.getClient()).listReview(id, { status: 'all' }); // resolved too: the sidebar lists them
+      const { comments, changes } = await (await session.getClient()).listReview(id, { status: 'all', surroundingChars: SURROUNDING }); // resolved too: the sidebar lists them
       if (!model.applyFetch(ticket, comments, changes)) return; // a newer fetch already landed
       this.syncedAt = Date.now();
       this.lastFetch = this.syncedAt;

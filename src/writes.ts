@@ -338,7 +338,7 @@ export class Writes implements vscode.Disposable {
   private async clearSuggestion(ids: string[], docId: string, what: string, hint = ''): Promise<boolean> {
     this.model.setHandled(ids, true);
     await this.suggestions.render();
-    const res = await this.enqueue(ids[0], () => this.write(what, (c, pid) => c.acceptChanges(pid, docId, ids), hint));
+    const res = await this.enqueue(ids[0], () => this.write(what, (c, pid) => c.acceptTrackedChangesInDoc(pid, docId, ids), hint));
     if (!res.ok) {
       this.model.setHandled(ids, false);
       await this.suggestions.render();

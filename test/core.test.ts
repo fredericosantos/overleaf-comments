@@ -240,7 +240,7 @@ import type { TrackedChange } from '@aloth/olcli';
 const LIVE = 'memory as a  population-size something  and of the';
 const ch = (id: string, kind: 'insert' | 'delete', text: string, position: number): TrackedChange => {
   const end = kind === 'insert' ? position + text.length : position;
-  return { id, docId: 'd', path: 'main.tex', position, line: 1, kind, text, before: LIVE.slice(Math.max(0, position - 40), position), after: LIVE.slice(end, end + 40), userId: 'u', user: { id: 'u', first_name: 'Ada', last_name: 'L' } };
+  return { id, docId: 'd', path: 'main.tex', position, line: 1, column: 1, kind, text, before: LIVE.slice(Math.max(0, position - 40), position), after: LIVE.slice(end, end + 40), author: { id: 'u', name: 'Ada L' } };
 };
 const liveChanges = [ch('c1', 'delete', 'function of the', 12), ch('c2', 'insert', 'population-size something', 13), ch('c3', 'delete', 'population', 38), ch('c4', 'delete', 'size', 39)];
 
