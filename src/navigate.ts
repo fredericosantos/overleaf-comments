@@ -4,7 +4,7 @@ import type { ProjectComment } from '@aloth/olcli';
 import { locate, lfView } from './anchor.ts';
 import type { Threads } from './threads.ts';
 import type { SuggestionEntry } from './suggest.ts';
-import { range, workspaceRoot, type Entry } from './common.ts';
+import { range, projectRoot, type Entry } from './common.ts';
 
 export async function reveal(threads: Threads, c: ProjectComment): Promise<void> {
   const live = threads.byId(c.threadId);
@@ -15,7 +15,7 @@ export async function reveal(threads: Threads, c: ProjectComment): Promise<void>
     return;
   }
   // A resolved comment has no editor thread: just take the user to its text.
-  const root = workspaceRoot();
+  const root = projectRoot();
   if (!root) return;
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(root, c.path.replace(/^\/+/, '')));
   const v = lfView(doc.getText());

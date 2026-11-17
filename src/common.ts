@@ -1,5 +1,6 @@
 // Shared constants, types and tiny helpers for the extension's modules.
 import * as vscode from 'vscode';
+import { pathIn } from './project.ts';
 import type { OverleafClient, ProjectComment } from '@aloth/olcli';
 
 export const COOKIE_KEY = 'overleafComments.cookie';
@@ -30,6 +31,19 @@ export class Cancelled extends Error {}
 
 export const cfg = () => vscode.workspace.getConfiguration('overleafComments');
 export const workspaceRoot = () => vscode.workspace.workspaceFolders?.[0]?.uri;
+
+let current: vscode.Uri | undefined;
+/** The folder of the Overleaf project in use (set by Session). A workspace can hold several git repositories (a
+ * multi-root workspace, or one folder with a clone per paper): the project is the one of the file being edited. Before
+ * any project is known it is the workspace folder, as for a workspace that is one Overleaf clone. */
+export const projectRoot = () => current ?? workspaceRoot();
+export const setProjectRoot = (root: vscode.Uri | undefined) => { current = root; };
+/** A file's path inside the project as Overleaf names it ('chap/intro.tex'), or undefined when it is not in the project. */
+export function projectPath(uri: vscode.Uri, root = projectRoot()): string | undefined {
+  return root && uri.scheme === 'file' ? pathIn(root.fsPath, uri.fsPath) : undefined;
+}
+/** Cached comments, one entry per project (a workspace can switch between several). */
+export const cacheKey = (projectId: string) => `${CACHE_KEY}.${projectId}`;
 /** Set a context key that `when` clauses in package.json can use. */
 export const setContext = (key: string, value: boolean) => void vscode.commands.executeCommand('setContext', `overleafComments.${key}`, value);
 export const range = (doc: vscode.TextDocument, start: number, end: number) => new vscode.Range(doc.positionAt(start), doc.positionAt(end));

@@ -8,7 +8,7 @@ import type { Sync } from './sync.ts';
 import type { Threads } from './threads.ts';
 import type { SuggestionThreads } from './suggest.ts';
 import { LOCAL, type Reviewing } from './reviewing.ts';
-import { Cancelled, NOT_ON_OVERLEAF, RERENDER_SLACK_MS, SYNCING, UNSYNCED_KEY, range, type Client, type NewCommentArgs, type Reply, type Written } from './common.ts';
+import { Cancelled, NOT_ON_OVERLEAF, RERENDER_SLACK_MS, SYNCING, UNSYNCED_KEY, projectPath, range, type Client, type NewCommentArgs, type Reply, type Written } from './common.ts';
 
 const optimistic = (text: string): vscode.Comment => ({ author: { name: 'You' }, body: new vscode.MarkdownString(text), mode: vscode.CommentMode.Preview, label: SYNCING });
 
@@ -43,12 +43,17 @@ export class Writes implements vscode.Disposable {
   /** Saved not-synced comments whose file could not be opened: kept for the next start, so their text is never lost. */
   private unrestored: { uri: string; args: NewCommentArgs }[] = [];
 
-  /** At startup: draw the not-synced comments of the last session again, on their text if it is still there. */
+  /** At startup (and when a project of the workspace is opened again): draw its not-synced comments of the last
+   * session again, on their text if it is still there. Those of the workspace's other projects stay stored. */
   async restoreUnsynced(): Promise<void> {
     const saved = this.ctx.workspaceState.get<{ uri: string; args: NewCommentArgs }[]>(UNSYNCED_KEY) ?? [];
     const kept: typeof saved = [];
     this.restoring = true;
     for (const { uri, args } of saved) {
+      if (projectPath(vscode.Uri.parse(uri)) === undefined) {
+        kept.push({ uri, args }); // another project's: back when that one is in use
+        continue;
+      }
       try {
         const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
         const v = lfView(doc.getText());
@@ -67,6 +72,18 @@ export class Writes implements vscode.Disposable {
     }
     this.restoring = false;
     this.unrestored = kept;
+    this.saveUnsynced();
+  }
+
+  /** Another project of the workspace takes over: put this one's not-synced comments away (stored, not lost); they
+   * are drawn again by restoreUnsynced when it is back. */
+  stash(): void {
+    for (const [temp, { uri, args }] of this.unsynced) {
+      this.unrestored.push({ uri: uri.toString(), args });
+      this.threads.removeUnsynced(temp);
+      temp.dispose();
+    }
+    this.unsynced.clear();
     this.saveUnsynced();
   }
 
@@ -142,7 +159,13 @@ export class Writes implements vscode.Disposable {
       void vscode.window.showErrorMessage('Overleaf Comments: nothing to anchor the comment to. Select some text (or click a non-empty line) and try again.');
       return;
     }
-    return this.addNew(doc, r.thread, { filePath: vscode.workspace.asRelativePath(doc.uri, false), content: text, ...anchor });
+    const filePath = projectPath(doc.uri);
+    if (filePath === undefined) {
+      r.thread.dispose();
+      void vscode.window.showErrorMessage('Overleaf Comments: this file is not in the Overleaf project in use. Click into it and try again.');
+      return;
+    }
+    return this.addNew(doc, r.thread, { filePath, content: text, ...anchor });
   }
 
   private async sendReply(threadId: string, text: string): Promise<void> {

@@ -10,6 +10,8 @@ See, reply to, resolve and add Overleaf review comments inside VS Code, for proj
 4. Suggestions (track changes) appear the same way, with Accept and Reject. Reject changes your local file; push it as usual.
 5. To suggest instead of edit, press the pencil in the panel's title bar (Reviewing). Your edits stay in the file as "Not synced" suggestions and become suggestions on Overleaf once you push.
 
+A workspace can also hold several Overleaf clones: a multi-root workspace, or one folder with a clone per paper. The comments shown are those of the project of the file you are editing; switching to a file of another clone switches the project (its name is shown in the sidebar and the status bar). **Overleaf Comments: Select Project** picks one by hand.
+
 Nothing else to install (the Overleaf client is bundled). Comment on text you haven't pushed yet and it waits as "Not synced", then sends itself once Overleaf has the text.
 
 Settings: `overleafComments.projectId`, `overleafComments.baseUrl`, `overleafComments.refreshMinutes`.

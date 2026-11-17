@@ -1,8 +1,9 @@
 // Wiring only: builds the pieces, registers commands and events, and (in test mode) exposes a small test API.
 import * as vscode from 'vscode';
+import { basename } from 'node:path';
 import type { ProjectComment } from '@aloth/olcli';
 import { Model, serializeCache } from './model.ts';
-import { Session } from './session.ts';
+import { Session, sameProject, type Project } from './session.ts';
 import { Threads } from './threads.ts';
 import { SuggestionThreads } from './suggest.ts';
 import { Reviewing } from './reviewing.ts';
@@ -10,7 +11,7 @@ import { Sync } from './sync.ts';
 import { Writes } from './writes.ts';
 import { CommentsTree, commentOf, firstText, type Node } from './tree.ts';
 import { focusReply, reveal, revealSuggestion } from './navigate.ts';
-import { CACHE_KEY, COOKIE_KEY, cfg, setContext, workspaceRoot, type Client, type Reply } from './common.ts';
+import { COOKIE_KEY, cacheKey, cfg, setContext, type Client, type Reply } from './common.ts';
 
 /** Only handed out in extension-test mode; the shipped extension exposes nothing. */
 export interface ExtensionApi {
@@ -33,6 +34,8 @@ export interface ExtensionApi {
   /** How many comments are currently drawn as not synced. */
   unsynced(): number;
   threads(): { uri: string; threadId: string; line: number; label?: string; messages: number }[];
+  /** The folder of the project in use (a workspace can hold several). */
+  project(): string | undefined;
 }
 
 let drain: () => Promise<void> = async () => {};
@@ -52,6 +55,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
   const treeView = vscode.window.createTreeView('overleafComments.threads', { treeDataProvider: tree });
   // The view's description is hidden when it is the only view in its container: say it at the top of the list too.
   const showMode = () => {
+    treeView.title = session.label() ?? 'Threads'; // several projects in the workspace: name the one shown
     treeView.description = reviewing.on ? 'Reviewing' : '';
     treeView.message = reviewing.on ? 'Reviewing: your edits become suggestions. The button above switches back to Editing.' : undefined;
   };
@@ -66,7 +70,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
 
   ctx.subscriptions.push(
     output, reviewing, suggestions, threads, tree, treeView, sync, writes,
-    vscode.window.onDidChangeActiveTextEditor(e => e && threads.redraw(e.document.uri)),
+    vscode.window.onDidChangeActiveTextEditor(e => { if (e) { threads.redraw(e.document.uri); void follow(e.document.uri); } }),
     vscode.window.onDidChangeVisibleTextEditors(es => { es.forEach(e => threads.redraw(e.document.uri)); threads.highlights.apply(); suggestions.apply(); }),
     vscode.window.onDidChangeWindowState(w => {
       const mins = cfg().get<number>('refreshMinutes'); // default (5) comes from package.json
@@ -74,7 +78,8 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     }),
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('overleafComments.baseUrl') || e.affectsConfiguration('overleafComments.projectId')) {
-        void sync.reset().then(() => sync.refresh({ quiet: true })); // new host / project: start over
+        if (e.affectsConfiguration('overleafComments.projectId')) session.forget();
+        void sync.reset().then(() => sync.refresh({ quiet: true })).then(showMode); // new host / project: start over
       }
     }),
     vscode.workspace.onDidChangeTextDocument(e => { reviewing.onTextChange(e); threads.onTextChange(e); suggestions.onTextChange(e); }),
@@ -104,6 +109,17 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     command('treeReply', (n: Node) => { const c = commentOf(n); const e = c && threads.byId(c.threadId); return e && focusReply(e); }),
     command('treeResolve', (n: Node) => { const c = commentOf(n); return c && writes.track(writes.setResolved(c.threadId, true)); }),
     command('treeReopen', (n: Node) => { const c = commentOf(n); return c && writes.track(writes.setResolved(c.threadId, false)); }),
+    command('selectProject', async () => {
+      const all = await session.discover();
+      const cur = session.current;
+      if (cur && !all.some(p => sameProject(p, cur))) all.unshift(cur);
+      if (!all.length) return void vscode.window.showInformationMessage('Overleaf Comments: no Overleaf project in this workspace (a git clone whose remote is git.overleaf.com/<id>).');
+      const pick = await vscode.window.showQuickPick(
+        all.map(p => ({ label: basename(p.root.fsPath), description: vscode.workspace.asRelativePath(p.root, true), detail: sameProject(p, cur) ? 'In use' : undefined, p })),
+        { placeHolder: 'Overleaf project to show the comments of' },
+      );
+      if (pick) await switchTo(pick.p);
+    }),
     command('refresh', () => vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Overleaf comments' }, () => sync.refresh())),
     command('clearCookie', async () => {
       await ctx.secrets.delete(COOKIE_KEY);
@@ -121,21 +137,46 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
   );
 
   void ctx.secrets.get(COOKIE_KEY).then(cookie => setContext('hasCookie', !!(cookie || process.env.OVERLEAF_SESSION_COOKIE)));
+
+  // A push or fetch moves the remote-tracking refs: refresh then, so what waited for the push is sent right away.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let refs: vscode.Disposable | undefined;
+  const pushed = () => { clearTimeout(timer); timer = setTimeout(() => { if (session.isOverleaf) void sync.refresh({ quiet: true, useCache: false }); }, 1500); };
+  const watchRefs = () => {
+    refs?.dispose();
+    const root = session.current?.root;
+    if (!root) return void (refs = undefined);
+    const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '.git/refs/remotes/**'));
+    refs = vscode.Disposable.from(w, w.onDidChange(pushed), w.onDidCreate(pushed));
+  };
+  ctx.subscriptions.push({ dispose: () => { clearTimeout(timer); refs?.dispose(); } });
+
   // quiet: this runs in every git repo, most of which are not Overleaf projects. Once we know this one is, bring back
   // what was waiting for a push in the last session.
-  void sync.refresh({ quiet: true }).then(async () => {
+  const start = async () => {
+    await sync.refresh({ quiet: true });
+    watchRefs();
+    showMode();
     if (!session.isOverleaf) return;
     vscode.workspace.textDocuments.forEach(d => reviewing.ensure(d));
+    suggestions.renderLocal(); // the local suggestions of this project (another one's may have been drawn)
     await writes.restoreUnsynced();
-  });
-  // A push or fetch moves the remote-tracking refs: refresh then, so what waited for the push is sent right away.
-  const root = workspaceRoot();
-  if (root) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const pushed = () => { clearTimeout(timer); timer = setTimeout(() => { if (session.isOverleaf) void sync.refresh({ quiet: true, useCache: false }); }, 1500); };
-    const refs = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '.git/refs/remotes/**'));
-    ctx.subscriptions.push(refs, refs.onDidChange(pushed), refs.onDidCreate(pushed), { dispose: () => clearTimeout(timer) });
-  }
+  };
+  // A workspace with several Overleaf clones (a multi-root workspace, or a folder holding a clone per paper): the
+  // comments shown are those of the project of the file being edited. One switch at a time, in order.
+  let switching: Promise<void> = start().catch(e => output.appendLine(`start: ${e}`));
+  const switchTo = (p: Project) => (switching = switching.then(async () => {
+    if (sameProject(p, session.current)) return;
+    output.appendLine(`project: ${p.root.fsPath} (${p.id})`);
+    writes.stash();
+    sync.clearView();
+    session.use(p);
+    await start();
+  }).catch(e => output.appendLine(`switch project: ${e}`)));
+  const follow = async (uri: vscode.Uri) => {
+    const p = await session.projectOf(uri);
+    if (p && !sameProject(p, session.current)) await switchTo(p);
+  };
 
   if (ctx.extensionMode !== vscode.ExtensionMode.Test) return undefined;
   return {
@@ -144,7 +185,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
       model.reset(); // as if the window had just been opened
       sync.statusItem.text = '';
       const { id } = await session.needProject();
-      await ctx.workspaceState.update(CACHE_KEY, serializeCache(id, comments, Date.now()));
+      await ctx.workspaceState.update(cacheKey(id), serializeCache(id, comments, Date.now()));
       await sync.refresh({ fetch });
     },
     storeCookie: v => Promise.resolve(ctx.secrets.store(COOKIE_KEY, v)),
@@ -156,6 +197,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
     tree: () => tree.getChildren().map(f => (f.kind === 'file' ? { file: f.path, threads: f.comments.map(c => `${c.resolved ? '[resolved] ' : ''}${firstText(c)}`) } : { file: '', threads: [] })),
     status: () => sync.statusItem.text,
     unsynced: () => threads.unsyncedCount(),
+    project: () => session.current?.root.fsPath,
     threads: () => threads.entries.map(e => ({ uri: e.thread.uri.toString(), threadId: e.comment.threadId, line: e.thread.range.start.line, label: e.thread.label, messages: e.thread.comments.length })),
   };
 }
