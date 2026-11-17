@@ -80,7 +80,7 @@ export function activate(ctx: vscode.ExtensionContext): ExtensionApi | undefined
       if (e.affectsConfiguration('overleafComments.baseUrl') || e.affectsConfiguration('overleafComments.projectId')) {
         if (e.affectsConfiguration('overleafComments.projectId')) session.forget();
         void sync.reset().then(() => sync.refresh({ quiet: true })).then(showMode); // new host / project: start over
-      }
+      } else if (e.affectsConfiguration('overleafComments.snapshotFile')) void sync.refresh({ quiet: true, useCache: false }); // write it now
     }),
     vscode.workspace.onDidChangeTextDocument(e => { reviewing.onTextChange(e); threads.onTextChange(e); suggestions.onTextChange(e); }),
     vscode.workspace.onDidOpenTextDocument(d => reviewing.ensure(d)),

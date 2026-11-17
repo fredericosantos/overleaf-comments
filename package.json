@@ -127,6 +127,11 @@
           "default": "https://www.overleaf.com",
           "description": "Overleaf instance URL (self-hosted: your server)."
         },
+        "overleafComments.snapshotFile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Also write the project's comments and suggestions to this file (path inside the project folder, e.g. `.overleaf-comments.json`) after every fetch, for coding agents and scripts to read. A read-only copy: editing it changes nothing on Overleaf. It is added to `.git/info/exclude`, so it is never pushed. Empty = off."
+        },
         "overleafComments.refreshMinutes": {
           "type": "number",
           "default": 5,

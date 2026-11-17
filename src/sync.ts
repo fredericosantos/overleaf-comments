@@ -4,7 +4,9 @@ import { Model, parseCache, serializeCache } from './model.ts';
 import type { Session } from './session.ts';
 import type { Threads } from './threads.ts';
 import type { SuggestionThreads } from './suggest.ts';
-import { CACHE_KEY, SetupError, cacheKey, setContext } from './common.ts';
+import type { ProjectComment, TrackedChange } from '@aloth/olcli';
+import { buildSnapshot, snapshotPath, writeSnapshot } from './snapshot.ts';
+import { CACHE_KEY, SetupError, cacheKey, cfg, setContext } from './common.ts';
 
 /** Text around each suggestion to ask for: enough to find it again after local edits (suggestions.ts uses up to 16). */
 const SURROUNDING = 40;
@@ -71,6 +73,7 @@ export class Sync implements vscode.Disposable {
       this.syncedAt = Date.now();
       this.lastFetch = this.syncedAt;
       await this.ctx.workspaceState.update(cacheKey(id), serializeCache(id, comments, this.syncedAt, changes));
+      void this.snapshot(id, comments, changes, this.syncedAt);
       this.setStatus('synced');
       setContext('loadFailed', false);
       await this.renderAll();
@@ -89,6 +92,20 @@ export class Sync implements vscode.Disposable {
       if (!quiet) void vscode.window.showErrorMessage(`Overleaf Comments: ${e instanceof Error ? e.message : e}`);
     }
   }
+
+  /** overleafComments.snapshotFile set: the fetched comments as a file in the project, for agents and scripts to read. */
+  private async snapshot(id: string, comments: ProjectComment[], changes: TrackedChange[], at: number): Promise<void> {
+    const rel = cfg().get<string>('snapshotFile');
+    const root = this.session.current?.root.fsPath;
+    if (!rel || !root) return;
+    const target = snapshotPath(root, rel);
+    if (!target) return void this.output.appendLine(`snapshotFile "${rel}" is outside the project folder: not written`);
+    const data = buildSnapshot(id, comments, changes, at);
+    // One write at a time: two quick fetches must not share the temporary file.
+    this.writing = this.writing.then(() => writeSnapshot(root, target, data)).catch(e => this.output.appendLine(`snapshot: ${e}`));
+    await this.writing;
+  }
+  private writing: Promise<void> = Promise.resolve();
 
   /** Forget everything (Clear Session Cookie, or a new host/project). In-flight fetches and renders become stale. */
   async reset(): Promise<void> {

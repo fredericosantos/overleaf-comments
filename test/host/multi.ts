@@ -2,6 +2,8 @@
 // Overleaf clones (paper-a, paper-b) and a folder that is not one. The comments shown follow the file being edited.
 import * as vscode from 'vscode';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { ProjectComment } from '@aloth/olcli';
 import type { ExtensionApi } from '../../src/extension.ts';
 
@@ -36,6 +38,8 @@ export async function run(): Promise<void> {
       return comment('tn', 'Beta', 0);
     },
   } as never);
+  await vscode.workspace.getConfiguration('overleafComments').update('snapshotFile', '.overleaf-comments.json', vscode.ConfigurationTarget.Global);
+  const snap = (dir: string) => { const f = join(ws.fsPath, dir, '.overleaf-comments.json'); return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : undefined; };
   await sleep(300); // the startup check: two clones, none in use yet, so nothing is chosen
   assert.equal(api.project(), undefined, 'a folder of several clones is not itself a project');
 
@@ -46,6 +50,9 @@ export async function run(): Promise<void> {
   assert.deepEqual(api.tree(), [{ file: 'main.tex', threads: ['note ta'] }], 'paths are relative to the clone, as Overleaf has them');
   assert.ok(fetched.includes(A));
   assert.match(api.status(), /Overleaf \(paper-a\)/);
+  await until('paper-a snapshot', () => snap('paper-a')?.comments?.length === 1);
+  assert.equal(snap('paper-a').projectId, A);
+  assert.deepEqual(snap('paper-a').comments[0].messages.map((m: { text: string }) => m.text), ['note ta']);
   // ... and a comment on text paper-a's Overleaf does not have yet: kept as not synced
   const docA = await vscode.workspace.openTextDocument(a);
   const tA = api.newThread(a, new vscode.Range(docA.positionAt(0), docA.positionAt(5)));
@@ -59,6 +66,8 @@ export async function run(): Promise<void> {
   assert.deepEqual(api.threads().map(t => [t.uri, t.threadId]), [[b.toString(), 'tb']]);
   assert.ok(fetched.includes(B));
   assert.equal(api.unsynced(), 0, "paper-a's not-synced comment is put away, not sent to paper-b");
+  await until('paper-b snapshot', () => snap('paper-b')?.projectId === B);
+  assert.equal(snap('paper-a').projectId, A, "each clone keeps its own snapshot");
 
   // 3. a new comment goes to paper-b, with its path inside paper-b
   const doc = await vscode.workspace.openTextDocument(b);
