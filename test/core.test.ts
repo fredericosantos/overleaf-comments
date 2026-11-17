@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { locate, occurrenceAt, highlightShape, lfView, shiftAnchor, anchorAt, reanchor, type TextChange } from '../src/anchor.ts';
-import { projectIdFromRemote } from '../src/project.ts';
+import { pathIn, projectIdFromRemote } from '../src/project.ts';
+import { posix, win32 } from 'node:path';
 import { authorOf, clipForThread, visibleIndices, messageHeight, THREAD_MAX_LINES, COLLAPSE_LINES, COLLAPSE_CHARS } from '../src/text.ts';
 
 const id = '6acf64d6fe2f2fd26f343c60';
@@ -12,6 +13,17 @@ test('projectIdFromRemote', () => {
   // exactly what `git remote -v` prints
   assert.equal(projectIdFromRemote(`origin\thttps://git.overleaf.com/${id} (fetch)`), id);
   assert.equal(projectIdFromRemote('https://github.com/a/b'), undefined);
+});
+
+test('pathIn: a file of the project gets its Overleaf path; files of sibling clones and the root itself do not', () => {
+  assert.equal(pathIn('/ws/paper', '/ws/paper/chap/f1.tex', posix), 'chap/f1.tex');
+  assert.equal(pathIn('/ws/paper', '/ws/paper-v2/main.tex', posix), undefined); // a sibling whose name starts the same
+  assert.equal(pathIn('/ws/paper', '/ws/other/main.tex', posix), undefined);
+  assert.equal(pathIn('/ws', '/ws/paper/main.tex', posix), 'paper/main.tex');
+  assert.equal(pathIn('/ws/paper', '/ws/paper', posix), undefined);
+  assert.equal(pathIn('/ws/paper', '/ws/paper/..notes.tex', posix), '..notes.tex');
+  assert.equal(pathIn('C:\\ws\\paper', 'C:\\ws\\paper\\chap\\f1.tex', win32), 'chap/f1.tex');
+  assert.equal(pathIn('C:\\ws\\paper', 'D:\\paper\\main.tex', win32), undefined);
 });
 
 test('locate: exact, shifted, lost', () => {
@@ -334,4 +346,45 @@ test('review: stored changes are found again after the text around them moved', 
   const moved = `NEW FIRST LINE\n${text}`;
   assert.deepEqual(restore(store(list, text), moved).map(c => [c.kind, c.at, c.text]), [['insert', 26, 'new'], ['delete', 29, 'old']]);
   assert.deepEqual(restore(store(list, text), 'something else entirely'), []);
+});
+
+import { buildSnapshot, snapshotPath, writeSnapshot } from '../src/snapshot.ts';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+test('buildSnapshot: comments and suggestions by file and line, authors and dates readable, paths without the leading slash', () => {
+  const c = (threadId: string, path: string, line: number, resolved = false) => ({
+    threadId, docId: 'd', path, position: 0, line, column: 0, selectedText: 'sel', resolved,
+    messages: [{ id: 'm', content: 'Please cite X', timestamp: 1_700_000_000_000, user: { first_name: 'Ada', last_name: 'L' } }],
+  });
+  const snap = buildSnapshot('p1', [c('t2', '/main.tex', 9, true), c('t1', '/main.tex', 3), c('t0', '/a/intro.tex', 20)], [
+    { id: 'i1', docId: 'd', path: '/main.tex', kind: 'insert', position: 5, line: 4, column: 0, text: 'new', author: { id: 'u', name: 'Bo' }, timestamp: '2026-01-02T03:04:05.000Z' },
+  ], Date.UTC(2026, 0, 1));
+  assert.equal(snap.projectId, 'p1');
+  assert.equal(snap.fetchedAt, '2026-01-01T00:00:00.000Z');
+  assert.deepEqual(snap.comments.map(x => [x.file, x.line, x.threadId, x.resolved]), [['a/intro.tex', 20, 't0', false], ['main.tex', 3, 't1', false], ['main.tex', 9, 't2', true]]);
+  assert.deepEqual(snap.comments[0].messages, [{ author: 'Ada L', date: '2023-11-14T22:13:20.000Z', text: 'Please cite X' }]);
+  assert.deepEqual(snap.suggestions, [{ id: 'i1', file: 'main.tex', line: 4, author: 'Bo', date: '2026-01-02T03:04:05.000Z', deleted: '', inserted: 'new' }]);
+});
+
+test('snapshotPath: only inside the project folder', () => {
+  assert.equal(snapshotPath('/p', '.overleaf-comments.json'), '/p/.overleaf-comments.json');
+  assert.equal(snapshotPath('/p', 'out/c.json'), '/p/out/c.json');
+  assert.equal(snapshotPath('/p', '../c.json'), undefined);
+  assert.equal(snapshotPath('/p', '/tmp/c.json'), undefined);
+  assert.equal(snapshotPath('/p', '  '), undefined);
+});
+
+test('writeSnapshot: whole file, excluded from git once, so git status stays clean', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'olc-snap-'));
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  const target = join(root, '.overleaf-comments.json');
+  await writeSnapshot(root, target, { a: 1 });
+  await writeSnapshot(root, target, { a: 2 });
+  assert.deepEqual(JSON.parse(readFileSync(target, 'utf8')), { a: 2 });
+  const exclude = readFileSync(join(root, '.git/info/exclude'), 'utf8');
+  assert.equal(exclude.split('\n').filter(l => l === '/.overleaf-comments.json*').length, 1);
+  assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }), '');
 });

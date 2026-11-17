@@ -14,13 +14,19 @@
   },
   "main": "./dist/extension.js",
   "activationEvents": [
-    "workspaceContains:.git"
+    "workspaceContains:.git",
+    "workspaceContains:*/.git",
+    "onLanguage:latex"
   ],
   "contributes": {
     "commands": [
       {
         "command": "overleafComments.setCookie",
         "title": "Overleaf Comments: Set Session Cookie"
+      },
+      {
+        "command": "overleafComments.selectProject",
+        "title": "Overleaf Comments: Select Project"
       },
       {
         "command": "overleafComments.refresh",
@@ -114,12 +120,17 @@
         "overleafComments.projectId": {
           "type": "string",
           "default": "",
-          "description": "Overleaf project id. Empty = read it from the git remote (git.overleaf.com/<id>)."
+          "description": "Overleaf project id of the workspace folder. Empty = read it from the git remote (git.overleaf.com/<id>). Other git clones in the workspace (one per paper) are always read from their own remote."
         },
         "overleafComments.baseUrl": {
           "type": "string",
           "default": "https://www.overleaf.com",
           "description": "Overleaf instance URL (self-hosted: your server)."
+        },
+        "overleafComments.snapshotFile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Also write the project's comments and suggestions to this file (path inside the project folder, e.g. `.overleaf-comments.json`) after every fetch, for coding agents and scripts to read. A read-only copy: editing it changes nothing on Overleaf. It is added to `.git/info/exclude`, so it is never pushed. Empty = off."
         },
         "overleafComments.refreshMinutes": {
           "type": "number",
@@ -330,6 +341,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.ts",
     "test:host": "esbuild test/host/suite.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/host-suite.cjs && node test/host/run.ts",
+    "test:multi": "esbuild test/host/multi.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/host-multi.cjs && OLC_SUITE=multi node test/host/run.ts",
     "test:live": "esbuild test/host/live.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/host-live.cjs --banner:js=\"const __importMetaUrl=require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__importMetaUrl && node test/host/run.ts",
     "dev": "npm run build && node scripts/dev.mjs",
     "notices": "node scripts/notices.mjs"

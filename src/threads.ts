@@ -7,7 +7,7 @@ import { authorOf, clipForThread, messageHeight, visibleIndices } from './text.t
 import { Highlights } from './markers.ts';
 import type { Model } from './model.ts';
 import type { Session } from './session.ts';
-import { ANCHOR_LOST, range, workspaceRoot, type Entry } from './common.ts';
+import { ANCHOR_LOST, projectPath, range, projectRoot, type Entry } from './common.ts';
 
 const TOGGLE = 'overleafComments.toggleMessage';
 const SHOW_THREAD = 'overleafComments.showThread';
@@ -36,7 +36,12 @@ export class Threads implements vscode.Disposable {
   constructor(private readonly model: Model, private readonly output: vscode.OutputChannel, session: Session, private readonly onChange: () => void) {
     this.highlights = new Highlights(() => this.entries, () => [...this.unsynced.keys()]);
     this.controller.commentingRangeProvider = {
-      provideCommentingRanges: doc => (session.isOverleaf !== false && doc.uri.scheme === 'file' && /\.tex$/i.test(doc.uri.fsPath) && doc.lineCount ? [new vscode.Range(0, 0, doc.lineCount - 1, 0)] : []),
+      // .tex files of an Overleaf project: the one in use, or another git clone of the workspace whose remote is Overleaf.
+      provideCommentingRanges: async doc => {
+        if (doc.uri.scheme !== 'file' || !/\.tex$/i.test(doc.uri.fsPath) || !doc.lineCount) return [];
+        const ok = (session.isOverleaf === true && projectPath(doc.uri) !== undefined) || !!(await session.projectOf(doc.uri));
+        return ok ? [new vscode.Range(0, 0, doc.lineCount - 1, 0)] : [];
+      },
     };
   }
 
@@ -129,7 +134,7 @@ export class Threads implements vscode.Disposable {
   }
 
   async render(): Promise<void> {
-    const root = workspaceRoot();
+    const root = projectRoot();
     if (!root) return;
     const gen = ++this.renderGen;
     const open = this.model.view(Date.now()).filter(c => !c.resolved); // resolved comments are not drawn in the editor

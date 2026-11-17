@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `overleafComments.snapshotFile`: after every fetch, write the comments and suggestions to a JSON file in the project, so coding agents and scripts can read the review (read-only, no Overleaf login of their own). Kept out of git via `.git/info/exclude`. Off by default.
+- Workspaces with several git repositories: a multi-root workspace, or one folder holding a clone per paper. The project in use is the Overleaf clone of the file being edited (git root + its `git.overleaf.com` remote), not the first workspace folder; comment paths are relative to that clone. Each project keeps its own cache, and its not-synced comments and local suggestions are put away (not sent anywhere else) while another project is in use. The sidebar and status bar name the project when the workspace has more than one. New command **Overleaf Comments: Select Project**. Also activates on `*/.git` and on LaTeX files.
+
 ## 0.2.0 (preview)
 
 - Suggestions (track changes) appear as threads with Accept / Reject, and in the sidebar: insertions in green, deletions as a red marker, a deletion next to an insertion as "Changed: old to new". Accept only clears the marker on Overleaf (your file already has the text). Reject undoes the change in your local file, for you to push, and clears the marker on Overleaf.
