@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { locate, occurrenceAt, highlightShape, lfView, shiftAnchor, anchorAt, reanchor, type TextChange } from '../src/anchor.ts';
-import { projectIdFromRemote } from '../src/project.ts';
+import { pathIn, projectIdFromRemote } from '../src/project.ts';
+import { posix, win32 } from 'node:path';
 import { authorOf, clipForThread, visibleIndices, messageHeight, THREAD_MAX_LINES, COLLAPSE_LINES, COLLAPSE_CHARS } from '../src/text.ts';
 
 const id = '6acf64d6fe2f2fd26f343c60';
@@ -12,6 +13,17 @@ test('projectIdFromRemote', () => {
   // exactly what `git remote -v` prints
   assert.equal(projectIdFromRemote(`origin\thttps://git.overleaf.com/${id} (fetch)`), id);
   assert.equal(projectIdFromRemote('https://github.com/a/b'), undefined);
+});
+
+test('pathIn: a file of the project gets its Overleaf path; files of sibling clones and the root itself do not', () => {
+  assert.equal(pathIn('/ws/paper', '/ws/paper/chap/f1.tex', posix), 'chap/f1.tex');
+  assert.equal(pathIn('/ws/paper', '/ws/paper-v2/main.tex', posix), undefined); // a sibling whose name starts the same
+  assert.equal(pathIn('/ws/paper', '/ws/other/main.tex', posix), undefined);
+  assert.equal(pathIn('/ws', '/ws/paper/main.tex', posix), 'paper/main.tex');
+  assert.equal(pathIn('/ws/paper', '/ws/paper', posix), undefined);
+  assert.equal(pathIn('/ws/paper', '/ws/paper/..notes.tex', posix), '..notes.tex');
+  assert.equal(pathIn('C:\\ws\\paper', 'C:\\ws\\paper\\chap\\f1.tex', win32), 'chap/f1.tex');
+  assert.equal(pathIn('C:\\ws\\paper', 'D:\\paper\\main.tex', win32), undefined);
 });
 
 test('locate: exact, shifted, lost', () => {

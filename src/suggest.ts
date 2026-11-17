@@ -7,7 +7,7 @@ import { lfView, shiftAnchor } from './anchor.ts';
 import { locateSuggestion, verbOf, type Suggestion } from './suggestions.ts';
 import type { Model } from './model.ts';
 import type { LocalSuggestion } from './reviewing.ts';
-import { ANCHOR_LOST, range, workspaceRoot } from './common.ts';
+import { ANCHOR_LOST, range, projectRoot } from './common.ts';
 
 export const LOCAL_LABEL = "Not synced · it becomes a suggestion on Overleaf once you've pushed it";
 
@@ -79,7 +79,7 @@ export class SuggestionThreads implements vscode.Disposable {
   }
 
   async render(): Promise<void> {
-    const root = workspaceRoot();
+    const root = projectRoot();
     if (!root) return;
     const gen = ++this.renderGen;
     const list = this.model.suggestions();

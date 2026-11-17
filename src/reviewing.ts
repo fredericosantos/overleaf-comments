@@ -7,7 +7,7 @@ import { applyEdit, restore, store, type LocalChange, type StoredChange } from '
 import { groupChanges, type Suggestion } from './suggestions.ts';
 import { lfView } from './anchor.ts';
 import type { Session } from './session.ts';
-import { range, setContext, workspaceRoot } from './common.ts';
+import { projectPath, range, setContext } from './common.ts';
 
 const ON_KEY = 'overleafComments.reviewing';
 const STORE_KEY = 'overleafComments.localSuggestions';
@@ -46,12 +46,13 @@ export class Reviewing implements vscode.Disposable {
     this.onChange();
   }
 
+  /** Where a file's suggestions are stored: relative to the workspace, so that the projects of a workspace with
+   * several never mix (in a workspace that is one project, this is the project path, as 0.2.0 stored it). */
   private relPath = (uri: vscode.Uri) => vscode.workspace.asRelativePath(uri, false);
 
   /** Only files of this Overleaf project are tracked. */
   private inProject(doc: vscode.TextDocument): boolean {
-    const root = workspaceRoot();
-    return this.session.isOverleaf === true && doc.uri.scheme === 'file' && !!root && doc.uri.fsPath.startsWith(root.fsPath + '/');
+    return this.session.isOverleaf === true && projectPath(doc.uri) !== undefined;
   }
 
   /** Start following a document: remember its text and bring back its stored suggestions. */
@@ -111,13 +112,14 @@ export class Reviewing implements vscode.Disposable {
     this.saveTimer = setTimeout(() => void this.ctx.workspaceState.update(STORE_KEY, this.stored), 300);
   }
 
-  /** Every local suggestion of the open documents, grouped like Overleaf groups them. */
+  /** Every local suggestion of the open documents of the project in use, grouped like Overleaf groups them (those
+   * of another project of the workspace wait until it is in use again). */
   items(): LocalSuggestion[] {
     const out: LocalSuggestion[] = [];
     for (const doc of vscode.workspace.textDocuments) {
       const list = this.changes.get(doc.uri.toString());
-      if (!list?.length) continue;
-      const path = this.relPath(doc.uri);
+      const path = projectPath(doc.uri);
+      if (!list?.length || path === undefined || this.session.isOverleaf !== true) continue;
       const asTracked = list.map((c): TrackedChange => ({ id: c.id, docId: '', path, position: c.at, line: doc.positionAt(c.at).line + 1, column: 0, kind: c.kind, text: c.text, author: { id: 'you', name: 'You' } }));
       for (const s of groupChanges(asTracked)) out.push({ uri: doc.uri, s, start: s.position, end: s.position + s.inserted.length });
     }
@@ -138,7 +140,7 @@ export class Reviewing implements vscode.Disposable {
         const b = v.fromDoc(x.end);
         return { before: v.lf.slice(Math.max(0, a - CONTEXT), a), after: v.lf.slice(b, b + CONTEXT), deleted: x.s.deleted, inserted: x.s.inserted, hint: a };
       });
-      return { uri: items[0].uri, path: this.relPath(items[0].uri), items, edits };
+      return { uri: items[0].uri, path: projectPath(items[0].uri)!, items, edits }; // items() has only files of the project
     });
   }
 
