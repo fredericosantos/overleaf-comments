@@ -335,3 +335,10 @@ test('review: stored changes are found again after the text around them moved', 
   assert.deepEqual(restore(store(list, text), moved).map(c => [c.kind, c.at, c.text]), [['insert', 26, 'new'], ['delete', 29, 'old']]);
   assert.deepEqual(restore(store(list, text), 'something else entirely'), []);
 });
+
+import { afterSend } from '../src/suggestions.ts';
+
+test('afterSend: only "not pushed yet" and "not found" keep a local suggestion; not-tracked warns', () => {
+  assert.deepEqual((['done', 'already-tracked', 'unchanged', 'invalid', 'not-pushed', 'not-found', 'not-tracked'] as const).map(afterSend),
+    ['drop', 'drop', 'drop', 'drop', 'keep', 'keep', 'warn']);
+});

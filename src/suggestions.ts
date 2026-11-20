@@ -1,6 +1,6 @@
 // Overleaf suggestions (tracked changes) as the review panel shows them: pure, no vscode import.
 // The git bridge exports the text with every suggestion applied: insertions are in the file, deletions are not.
-import type { TrackedChange } from '@aloth/olcli';
+import type { SuggestionResult, TrackedChange } from '@aloth/olcli';
 import { locate } from './anchor.ts';
 
 export interface Suggestion {
@@ -47,6 +47,20 @@ export function groupChanges(changes: TrackedChange[]): Suggestion[] {
     out.push({ ...base, ids: del ? [c.id, del.id] : [c.id], inserted: c.text, deleted: del?.text ?? '' });
   }
   return out;
+}
+
+/**
+ * What to do with a local suggestion after Overleaf answered (olcli's suggestChanges):
+ * drop it (it is a suggestion on Overleaf now, or there was nothing to send), keep it until the push or pull that
+ * makes it match, or drop it and tell the user (Overleaf got the text but did not track it, so it stays plain text
+ * there; sending it again could change the text twice).
+ */
+export function afterSend(r: SuggestionResult): 'drop' | 'keep' | 'warn' {
+  switch (r) {
+    case 'done': case 'already-tracked': case 'unchanged': case 'invalid': return 'drop';
+    case 'not-pushed': case 'not-found': return 'keep';
+    case 'not-tracked': return 'warn';
+  }
 }
 
 /** "Added" / "Deleted" / "Changed", as the review panel says it. */
