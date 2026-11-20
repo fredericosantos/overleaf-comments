@@ -8,6 +8,8 @@ import type { Sync } from './sync.ts';
 import type { Threads } from './threads.ts';
 import type { SuggestionThreads } from './suggest.ts';
 import { LOCAL, type Reviewing } from './reviewing.ts';
+import { afterSend } from './suggestions.ts';
+import { SuggestionPermissionError } from '@aloth/olcli';
 import { Cancelled, NOT_ON_OVERLEAF, RERENDER_SLACK_MS, SYNCING, UNSYNCED_KEY, range, type Client, type NewCommentArgs, type Reply, type Written } from './common.ts';
 
 const optimistic = (text: string): vscode.Comment => ({ author: { name: 'You' }, body: new vscode.MarkdownString(text), mode: vscode.CommentMode.Preview, label: SYNCING });
@@ -16,6 +18,7 @@ export class Writes implements vscode.Disposable {
   /** New comments whose text is not in Overleaf's copy yet, shown in their thread as "Not synced" until it is. */
   private readonly unsynced = new Map<vscode.CommentThread, { uri: vscode.Uri; args: NewCommentArgs }>();
   private retrying = false;
+  private warnedPermission = false;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
@@ -270,10 +273,21 @@ export class Writes implements vscode.Disposable {
       const client = await this.session.getClient();
       for (const f of files) {
         const results = await client.suggestChanges(id, f.path, f.edits);
-        results.forEach((r, i) => { if (r === 'done') { this.reviewing.drop(f.items[i]); sent++; } });
+        results.forEach((r, i) => {
+          const next = afterSend(r);
+          if (next === 'keep') return;
+          this.reviewing.drop(f.items[i]);
+          sent++;
+          if (next === 'warn') void vscode.window.showWarningMessage(`Overleaf Comments: your edit in ${f.path} reached Overleaf, but Overleaf did not mark it as a suggestion. It stays there as a normal edit.`);
+        });
       }
     } catch (e) {
       this.output.appendLine(`send local suggestions: ${e}`);
+      // Review-only or read-only access: say it once per session; the suggestions stay until it is fixed.
+      if (e instanceof SuggestionPermissionError && !this.warnedPermission) {
+        this.warnedPermission = true;
+        void vscode.window.showWarningMessage(`Overleaf Comments: your local suggestions cannot be sent: ${e.message}`);
+      }
     }
     if (sent) await this.sync.refresh({ quiet: true, useCache: false });
   }
